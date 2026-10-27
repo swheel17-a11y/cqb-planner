@@ -158,6 +158,7 @@ body.ro .timeline{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
 button.chip[aria-pressed="true"]{background:var(--hostile);border-color:var(--hostile);color:#fff}
 button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--panel)}
 .hud-tl{right:230px}
+@media (max-width:440px){.chip{padding:4px 7px;letter-spacing:.03em;font-size:12px}}
 @media (max-width:640px){.hud-tl{right:12px;top:48px}.hud-tl .title{display:none}.caption{top:84px}}
 .legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .lg{display:inline-flex;align-items:center;gap:4px}
@@ -279,6 +280,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
       <span class="chip hint" id="tool-hint"></span>
     </div>
     <div class="hud hud-tr">
+      <button class="chip" id="btn-routes" aria-pressed="true" title="Show or hide routes, waypoints and look lines">Routes</button>
       <button class="chip cones" id="btn-cones" aria-pressed="true" title="Show where each person is looking">View cones</button>
       <button class="chip" id="btn-threat" aria-pressed="false" title="Shade what every hostile can see">Threat view</button>
       <button class="chip cam" id="btn-camkey" hidden title="Save what the camera shows now as a key at this time">＋ Camera key</button>
@@ -570,7 +572,7 @@ const HINTS = {
 let uid = 1;
 const newId = () => 'i' + (uid++);
 function blank(){ return {title:'Untitled scenario', notes:'', flagRule:true, cols:24, rows:16, edges:new Map(), items:[], arrows:[], steps:[], cam:[], drone:{who:'', h:14, d:12}}; }
-let S = blank(), ver = 0, sel = null, tool = 'select', furnKind = 'couch', losId = null, threatOn = false, conesOn = true, mode = 'plan';
+let S = blank(), ver = 0, sel = null, tool = 'select', furnKind = 'couch', losId = null, threatOn = false, conesOn = true, routesOn = true, mode = 'plan';
 let READONLY = false, shareRO = true;   // view-only scenario / what the next save produces
 let TIME = 0, playing = false, speed = 1, pausedStep = null, lookArm = null;
 let undoStack = [], redoStack = [];
@@ -1316,7 +1318,7 @@ function drawPlan(){
   const sp = selPerson(), R0 = clamp(0.3*sc, 8, 20), SC2 = sched();
   // while picking a "move when he reaches" spot, the man he's keying off is the one to look at
   const pickWho = (() => { if(!lookArm || !lookArm.route) return null; const o = getItem(lookArm.id), ow = o && (lookArm.i < 0 ? o : o.path && o.path[lookArm.i]), a = ow && ow.acts && ow.acts[lookArm.a]; return a ? getItem(a.who) : null; })();
-  const focus = pickWho || sp;
+  const focus = pickWho || sp, showRoutes = routesOn || tool==='path' || !!pickWho;
   const drawLooks = (it, acts, p, col, owner) => { (acts||[]).forEach(a => {
       if(a.k==='wloc' && a.set){ const w = getItem(a.who), pts = w && routePts(w); if(!pts || !pts[a.seg+1]) return;
         const A = pts[a.seg], Bp = pts[a.seg+1], q = toScreen(A.x+(Bp.x-A.x)*a.f, A.y+(Bp.y-A.y)*a.f);
@@ -1336,7 +1338,7 @@ function drawPlan(){
       ctx.strokeStyle = col; ctx.globalAlpha = on?0.9:0.55; ctx.lineWidth = 1.2; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(lq.x,lq.y); ctx.stroke(); ctx.setLineDash([]);
       drawEye(ctx, lq.x, lq.y, col, C, on); ctx.globalAlpha = 1;
       hits.push({kind:'alook', it, act:a, owner, x:lq.x, y:lq.y, rx:14, ry:14}); }); };
-  for(const it of S.items){ if(!isPerson(it)) continue;
+  if(showRoutes) for(const it of S.items){ if(!isPerson(it)) continue;
     const hasPath = it.path && it.path.length, isSel = sp===it;
     if(!hasPath && !(isSel && it.acts && it.acts.length)) continue;
     const col = pColor(it,C), pts = [{x:it.x,y:it.y}, ...(it.path||[])].map(p => toScreen(p.x,p.y));
@@ -1469,6 +1471,7 @@ function drawPlan(){
   const vis = visibleSteps(), visSet = new Set(vis);
   S.steps.forEach((st,i) => { if(st.x==null) return;
     const p = toScreen(st.x, st.y), act = visSet.has(i), ssel = sel && sel.type==='step' && sel.id===st.id;
+    if(!routesOn && !act && !ssel && tool!=='note') return;
     ctx.fillStyle = act || ssel ? C.accent : C.panel; ctx.strokeStyle = act || ssel ? C.accent : C.ink2; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x-6, p.y-9); ctx.arc(p.x, p.y-15, 9, Math.PI*0.75, Math.PI*0.25); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle = act || ssel ? tok('--accent-ink') : C.ink; ctx.font = '700 11px "Barlow Condensed", sans-serif'; ctx.fillText(String(i+1), p.x, p.y-15);
@@ -2096,7 +2099,7 @@ function setMode(m){
   const plan = m==='plan';
   planCv.hidden = !plan; toolsEl.hidden = !plan; $('#timeline').classList.toggle('last', !plan); $('#hud-legend').hidden = !plan; $('#tool-hint').hidden = !plan;
   $('#btn-fit').textContent = plan ? 'Fit' : m==='walk' ? 'Restart' : 'Reset view';
-  $('#btn-threat').hidden = m==='walk'; $('#btn-cones').hidden = m==='walk';
+  $('#btn-threat').hidden = m==='walk'; $('#btn-cones').hidden = m==='walk'; $('#btn-routes').hidden = m==='walk';
   syncCamUI();
   hidePicker(); renderInspector(); updateCaption(); updateHint();
   $('#view3d').hidden = plan; $('#hud-3d').hidden = plan; $('#joy').hidden = m!=='walk';
@@ -2433,12 +2436,13 @@ function build3D(){
     const c = rectCorners(it); for(let i=0;i<4;i++){ const a=c[i], b=c[(i+1)%4]; T.segs.push([a[0]*FT,a[1]*FT,b[0]*FT,b[1]*FT]); }
   }
   // routes on the floor
+  T.routes = new THREE.Group(); T.routes.visible = routesOn; root.add(T.routes);
   for(const it of S.items){ if(!isPerson(it) || !it.path || !it.path.length) continue;
     const col = it.k==='f'?C.friend:it.k==='h'?C.hostile:C.civ, pts = [{x:it.x,y:it.y}, ...it.path];
     const pos = []; for(let i=1;i<pts.length;i++) pos.push(pts[i-1].x*FT,0.06,pts[i-1].y*FT, pts[i].x*FT,0.06,pts[i].y*FT);
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
     const ln = new THREE.LineSegments(g, new THREE.LineDashedMaterial({color:col, dashSize:0.8, gapSize:0.6, transparent:true, opacity:.6}));
-    ln.computeLineDistances(); root.add(ln); }
+    ln.computeLineDistances(); T.routes.add(ln); }
   // people
   const kit = figureKit(), gFan = new THREE.CircleGeometry(6, 20, -rad(CONE_DEG/2), rad(CONE_DEG));
   S.items.filter(isPerson).forEach((it, idx) => { if(mode==='walk' && it.id===walkFromId) return;
@@ -2507,7 +2511,7 @@ function updateDyn(dt){
     p.g.position.set(ps.x*FT, 0, ps.y*FT); p.g.rotation.y = -rad(ps.r||0);
     if(p.sp) p.sp.position.set(ps.x*FT, p.it.p?5.6:7.3, ps.y*FT);
     poseFigure(p, !!ps.moving, TIME); if(ps.moving) busy = busy || playing;
-    p.fan.visible = conesOn;
+    p.fan.visible = conesOn; if(T.routes) T.routes.visible = routesOn;
     const st = ps.sig ? (ps.sig.txt || SIGS[ps.sig.s] || 'Signal') + (ps.sig.to && getItem(ps.sig.to) ? ' → ' + tagOf(getItem(ps.sig.to)) : '') : '';
     if(st !== p.sigText){ if(p.sigSp){ T.root.remove(p.sigSp); p.sigSp.material.map.dispose(); p.sigSp.material.dispose(); p.sigSp = null; }
       p.sigText = st; if(st){ p.sigSp = textSprite(st, '#ffffff', p.col); p.sigSp.scale.multiplyScalar(0.9); T.root.add(p.sigSp); } }
@@ -2714,6 +2718,8 @@ $('#btn-undo').addEventListener('click', undo);
 $('#btn-redo').addEventListener('click', redo);
 $('#btn-fit').addEventListener('click', () => { if(mode==='plan') fitPlan(); else if(mode==='walk') startWalk(); else resetOrbit(); });
 $('#btn-threat').addEventListener('click', () => { threatOn = !threatOn; $('#btn-threat').setAttribute('aria-pressed', String(threatOn)); drawPlan(); if(T) T.dirty = true; });
+$('#btn-routes').addEventListener('click', () => { routesOn = !routesOn; $('#btn-routes').setAttribute('aria-pressed', String(routesOn)); if(T && T.routes) T.routes.visible = routesOn; drawPlan(); if(T) T.dirty = true;
+  toast(routesOn ? 'Routes showing' : 'Routes hidden · clean view for demos and video'); });
 $('#btn-cones').addEventListener('click', () => { conesOn = !conesOn; $('#btn-cones').setAttribute('aria-pressed', String(conesOn)); drawPlan(); if(T) T.dirty = true; });
 $('#title-chip').addEventListener('click', () => openSheet('brief'));
 $('#btn-brief').addEventListener('click', () => openSheet('brief'));
@@ -3269,7 +3275,7 @@ const TOUR = [
   {sel:'#tools', t:'Actions make it a plan', b:'At each waypoint, add actions that run in order: <b>look</b> or <b>sweep</b>, change <b>gun posture</b>, <b>signal</b> a teammate (nod, tricep squeeze), <b>open a door</b>, <b>throw a flashbang</b>. Then chain the team: <b>wait for signal</b>, <b>wait for door</b>, <b>move with</b>, <b>move when he reaches</b> a spot, <b>move on bang</b>.'},
   {sel:'#timeline', t:'Play it back', b:'Press <b>play</b> to run the plan. Drag the slider to any moment. The markers show notes, gates and flashbangs. <b>Steps</b> lists every note.'},
   {sel:'#tool-note', t:'Notes for the team', b:'Pick <b>Note</b> and tap right on someone’s route. The note pops up when he gets there, pauses the playback, and goes away when you press <b>Continue</b>.'},
-  {sel:'#btn-cones', t:'See what they see', b:'<b>View cones</b> show where everyone is looking. <b>Threat view</b> shades what the hostiles can see. Tap a person and choose <b>Show what they see</b> to shade his dead space.'},
+  {sel:'#btn-routes', t:'See what they see', b:'<b>Routes</b> hides the lines for a clean demo. <b>View cones</b> show where everyone is looking. <b>Threat view</b> shades what the hostiles can see. Tap a person and choose <b>Show what they see</b> to shade his dead space.'},
   {sel:'.modes', t:'3D and Walk', b:'<b>3D</b> shows the run from above; try <b>Drone</b>, a camera that follows the team. <b>Walk</b> puts you at eye level, or rides along with one shooter.'},
   {sel:'#btn-share', t:'Send it to the team', b:'Copy a <b>share link</b> to text or post, choose <b>view only</b> or <b>editable</b>, save a file, or <b>record a video</b> anyone can watch.'},
   {sel:'#btn-lib', t:'My scenarios', b:'Save scenarios on this device and reopen them later. Export a backup now and then.'},
