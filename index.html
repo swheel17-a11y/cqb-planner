@@ -114,6 +114,12 @@ body.ro .timeline{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
 .cam-row input{width:72px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--sheet);font-family:var(--f-mono);font-size:13px}
 .chip.cam{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .seg button:disabled{opacity:.4;cursor:default}
+.lib-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.lib-row.cur .lib-main b{color:var(--accent)}
+.lib-main{flex:1 1 180px;min-width:0;display:flex;flex-direction:column}
+.lib-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-main input{padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--sheet)}
+#lib-list{display:flex;flex-direction:column}
 .keys{font-family:var(--f-mono);font-size:12px;color:var(--ink-2)}
 .bar{display:flex;align-items:center;gap:10px;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--panel);border-bottom:1px solid var(--line);min-width:0}
 .mark{font-family:var(--f-display);font-size:22px;letter-spacing:.04em;line-height:1;color:var(--ink);white-space:nowrap}
@@ -226,7 +232,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
 @media (max-width:520px){
   .mark small{display:none}
   .modes button{padding:7px 9px;font-size:13px}
-  .acts .ib{width:32px}
+  .acts .ib{width:30px}
   .bar{gap:6px}
   .hide-narrow{display:none!important}
 }
@@ -246,6 +252,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
     <div class="acts">
       <button class="ib" id="btn-undo" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 6L4 11l5 5"/><path d="M4 11h10a5 5 0 0 1 0 10h-3"/></svg></button>
       <button class="ib hide-narrow" id="btn-redo" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 6l5 5-5 5"/><path d="M20 11H10a5 5 0 0 0 0 10h3"/></svg></button>
+      <button class="ib" id="btn-lib" title="My scenarios" aria-label="My scenarios"><svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/></svg></button>
       <button class="ib" id="btn-brief" title="Briefing" aria-label="Briefing"><svg viewBox="0 0 24 24"><path d="M9 3h6v3H9z"/><path d="M7 5H5v16h14V5h-2"/><path d="M8 11h8M8 15h5"/></svg></button>
       <button class="ib primary" id="btn-share" title="Send or open" aria-label="Send or open"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 14v6h14v-6"/></svg></button>
     </div>
@@ -421,6 +428,21 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
         <p class="small" style="margin:0">Your own shots: frame a view, set the timeline, tap “＋ Camera key”. Playback flies smoothly between your keys.</p>
         <div id="cam-list"></div>
         <button class="btn primary wide" id="cam-add">Add a key from the current view</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="lib" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="lib-h">
+      <div class="sheet-head"><div><div class="eyebrow">Saved on this device</div><h2 id="lib-h">My scenarios</h2></div><button class="ib" data-close="lib" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="field"><label for="lib-name">Name</label><input id="lib-name" type="text" maxlength="120"></div>
+      <p class="small" id="lib-status" style="margin:0"></p>
+      <div class="row"><button class="btn primary" id="lib-save">Save to My scenarios</button><button class="btn" id="lib-saveas" hidden>Save as a new copy</button></div>
+      <div id="lib-list"></div>
+      <div class="block">
+        <h3>Backup</h3>
+        <p>Your list lives in this browser on this device. If the browser’s data is cleared it goes with it, so export a backup now and then. Import one to bring your scenarios to another phone or computer.</p>
+        <div class="row"><button class="btn" id="lib-export">Export all</button><span class="btn filebtn">Import a backup…<input type="file" id="lib-import" accept=".json,application/json"></span></div>
       </div>
     </div>
   </div>
@@ -695,7 +717,7 @@ function fromData(d){
   return s;
 }
 function loadScenario(data, opts={}){
-  const s = fromData(data);
+  const s = fromData(data); if(typeof libCurrent!=='undefined') libCurrent = null;
   if(opts.undoable) checkpoint(); else { undoStack=[]; redoStack=[]; updateUndo(); }
   setReadOnly(!!data.ro);
   camMode = 'free'; syncCamUI();
@@ -3102,6 +3124,69 @@ $('#cam-list').addEventListener('focusin', () => { camCk = false; });
 $('#cam-list').addEventListener('input', e => { if(e.target.dataset.cf!=='t') return; const k = S.cam[+e.target.closest('.cam-row').dataset.i]; const v = +e.target.value;
   if(!k || !(v>=0)) return; if(!camCk){ checkpoint(); camCk = true; } k.t = snapT(v); changed(); });
 $('#cam-list').addEventListener('change', e => { if(e.target.dataset.cf==='t'){ S.cam.sort((a,b) => a.t-b.t); changed(); renderCamList(); } });
+
+/* ---------------- my scenarios (saved in this browser) ----------------
+   A named list kept in this browser's storage on this device. Each entry is the scenario's save data.
+   Export writes them all to one backup file; import adds a backup's scenarios to the list. */
+const LIB_KEY = 'cqb-library-v1';
+let libCurrent = null, libSavedVer = -1;
+function libRead(){ try{ const v = JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); return Array.isArray(v) ? v : []; }catch(e){ return []; } }
+function libWrite(list){ try{ localStorage.setItem(LIB_KEY, JSON.stringify(list)); return true; }catch(e){ toast('Couldn’t save · this browser’s storage is full or turned off'); return false; } }
+const libId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+function libSave(asNew){
+  const name = ($('#lib-name').value || S.title || 'Untitled scenario').trim().slice(0,120);
+  if(S.title !== name){ S.title = name; changed(); syncBrief(); }
+  const list = libRead(), data = toData(READONLY), now = Date.now();
+  let e = !asNew && libCurrent && list.find(x => x.id===libCurrent);
+  if(e){ e.title = name; e.updated = now; e.data = data; }
+  else { e = {id:libId(), title:name, updated:now, data}; list.unshift(e); }
+  if(libWrite(list)){ libCurrent = e.id; libSavedVer = ver; toast(asNew || !e ? 'Saved to My scenarios' : 'Saved'); renderLib(); }
+}
+function libOpen(id){
+  const e = libRead().find(x => x.id===id); if(!e) return;
+  try{ loadScenario(e.data, {undoable:true}); }catch(err){ toast('That saved scenario couldn’t be opened'); return; }
+  libCurrent = id; libSavedVer = ver; $('#lib').hidden = true; setMode('plan'); toast('Opened ' + e.title);
+}
+function renderLib(){
+  const list = libRead(), cur = list.find(x => x.id===libCurrent), dirty = cur && libSavedVer !== ver;
+  $('#lib-name').value = S.title || '';
+  $('#lib-save').textContent = cur ? (dirty ? 'Save changes' : 'Saved') : 'Save to My scenarios';
+  $('#lib-save').disabled = !!cur && !dirty;
+  $('#lib-saveas').hidden = !cur;
+  $('#lib-status').textContent = cur ? (dirty ? `You have unsaved changes to “${cur.title}”.` : `This is “${cur.title}” from your list.`) : 'This scenario isn’t in your list yet.';
+  const fmt = t => { try{ return new Date(t).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}); }catch(e){ return ''; } };
+  $('#lib-list').innerHTML = list.length ? list.map(e => `<div class="lib-row ${e.id===libCurrent?'cur':''}" data-id="${e.id}">
+      <div class="lib-main"><b>${esc(e.title)}</b><span class="small">${e.data && e.data.ro ? 'View only · ' : ''}${fmt(e.updated)} · ${Math.max(1, Math.round(JSON.stringify(e.data).length/1024))} KB</span></div>
+      <button class="btn sm" data-lo="${e.id}">Open</button><button class="btn sm" data-lr="${e.id}">Rename</button><button class="btn sm danger" data-ld="${e.id}" aria-label="Delete ${esc(e.title)}">✕</button></div>`).join('')
+    : '<p class="small" style="margin:0">Nothing saved yet. Name this scenario above and save it.</p>';
+}
+$('#btn-lib').addEventListener('click', () => { pause(); renderLib(); $('#lib').hidden = false; });
+$('#lib-save').addEventListener('click', () => libSave(false));
+$('#lib-saveas').addEventListener('click', () => libSave(true));
+$('#lib-list').addEventListener('click', e => {
+  const o = e.target.closest('[data-lo]'), r = e.target.closest('[data-lr]'), d = e.target.closest('[data-ld]');
+  if(o){ const go = () => libOpen(o.dataset.lo);
+    if(libSavedVer !== ver && !(libCurrent===null && undoStack.length===0)) confirmAsk('Open it? Changes you haven’t saved stay in Undo.', 'Open', go); else go(); }
+  if(r){ const list = libRead(), en = list.find(x => x.id===r.dataset.lr); if(!en) return;
+    const row = r.closest('.lib-row'); row.querySelector('.lib-main').innerHTML = `<input type="text" id="lib-ren-${en.id}" value="${esc(en.title)}" maxlength="120" aria-label="New name">`;
+    const inp = row.querySelector('input'); inp.focus(); inp.select();
+    const done = () => { const v = inp.value.trim(); if(v){ en.title = v; if(en.data) en.data.t = v; libWrite(list); if(en.id===libCurrent){ S.title = v; changed(); syncBrief(); libSavedVer = ver; } } renderLib(); };
+    inp.addEventListener('keydown', ev => { if(ev.key==='Enter') done(); if(ev.key==='Escape') renderLib(); }); inp.addEventListener('blur', done); }
+  if(d){ const list = libRead(), en = list.find(x => x.id===d.dataset.ld); if(!en) return;
+    confirmAsk(`Delete “${en.title}” from My scenarios?`, 'Delete', () => { libWrite(libRead().filter(x => x.id!==en.id)); if(libCurrent===en.id) libCurrent = null; renderLib(); $('#lib').hidden = false; }); }
+});
+$('#lib-export').addEventListener('click', () => {
+  const list = libRead(); if(!list.length){ toast('Nothing to export yet'); return; }
+  saveBlob(new Blob([JSON.stringify({cqbLibrary:1, saved:Date.now(), scenarios:list}, null, 1)], {type:'application/json'}), 'cqb-scenarios-backup.json');
+});
+$('#lib-import').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if(!f) return;
+  const rd = new FileReader(); rd.onload = () => { try{
+      const j = JSON.parse(String(rd.result)), inc = Array.isArray(j) ? j : j.scenarios; if(!Array.isArray(inc)) throw 0;
+      const list = libRead(), have = new Set(list.map(x => x.id)); let n = 0;
+      for(const x of inc){ if(!x || !x.data) continue; fromData(x.data); const en = {id: have.has(x.id) ? libId() : (x.id || libId()), title:String(x.title||x.data.t||'Imported scenario').slice(0,120), updated:+x.updated||Date.now(), data:x.data}; list.push(en); n++; }
+      if(libWrite(list)){ toast(`Added ${n} scenario${n===1?'':'s'}`); renderLib(); }
+    }catch(err){ toast('That isn’t a scenarios backup file'); } };
+  rd.readAsText(f); e.target.value = ''; });
 
 // the scenario a fresh copy of the planner opens with
 const DEFAULT_SCENARIO = {"v":3,"ro":0,"t":"Drill · Hall boss gives up the door","n":"EXAMPLE DRILL — adjust spacing, timing and calls to your SOP.\n\nThe sequence:\n• #1 (hall boss) reaches the threshold with his gun trained on the door.\n• He relinquishes the door by looking back down the hallway. That opens the gate “Door”.\n• #2 is holding on gate “Door”. Once it opens he flows in and buttons left. #3 follows and buttons right; #4 flows opposite the gun in front of him.\n\nTap a shooter, then a waypoint, to see the actions that make this happen.","w":20,"h":12,"e":[["h",1,4,"w",0,0],["h",2,4,"w",0,0],["h",3,4,"w",0,0],["h",4,4,"w",0,0],["h",5,4,"w",0,0],["h",6,4,"w",0,0],["h",7,4,"w",0,0],["h",8,4,"w",0,0],["h",9,4,"w",0,0],["h",10,4,"w",0,0],["h",11,4,"w",0,0],["h",12,4,"w",0,0],["h",13,4,"w",0,0],["h",14,4,"w",0,0],["h",15,4,"w",0,0],["h",16,4,"w",0,0],["h",17,4,"w",0,0],["h",18,4,"w",0,0],["h",1,6,"w",0,0],["h",2,6,"w",0,0],["h",3,6,"w",0,0],["h",4,6,"w",0,0],["h",5,6,"w",0,0],["h",6,6,"w",0,0],["h",7,6,"w",0,0],["h",8,6,"w",0,0],["h",9,6,"w",0,0],["h",11,6,"w",0,0],["h",12,6,"w",0,0],["h",13,6,"w",0,0],["h",14,6,"w",0,0],["h",15,6,"w",0,0],["h",16,6,"w",0,0],["h",17,6,"w",0,0],["h",18,6,"w",0,0],["v",1,4,"w",0,0],["v",1,5,"w",0,0],["v",7,6,"w",0,0],["v",7,7,"w",0,0],["v",7,8,"w",0,0],["v",7,9,"w",0,0],["v",7,10,"w",0,0],["v",14,6,"w",0,0],["v",14,7,"w",0,0],["v",14,8,"w",0,0],["v",14,9,"w",0,0],["v",14,10,"w",0,0],["h",7,11,"w",0,0],["h",8,11,"w",0,0],["h",9,11,"w",0,0],["h",10,11,"w",0,0],["h",11,11,"w",0,0],["h",12,11,"w",0,0],["h",13,11,"w",0,0]],"i":[["f",5,4.33,0,"1",0,2,0,[[9,4.33,5,[["w",1],["o","Door"],["l",13,5,0]],12,6.67],[10.5,6,5,[["l",13,5.17,0.5]],13,5]]],["f",5,5.5,0,"2",0,2,0,[[9,5.5,5,[["q","Door"]],16.83,5.5],[10.17,6,5,0,10.33,7.33],[10.17,6.33,5,[["l",7.17,6.33,0]],7.5,6.33],[9.5,6.33,5,[["l",9.5,10,0.5]]]]],["f",4.5,5.5,0,"3",0,1,0,[[8.83,5.5,5,[["q","Door"]]],[9.33,5.67,5,[["g",2]],13.5,6.17],[10.5,6.17,5,[["g",2]],13.67,6.17],[11.17,6.17,5,[["l",11,10.17,0.5]],13.67,6.33]]],["f",4,5.5,0,"4",0,1,0,[[8.67,5.5,5,[["q","Door"],["g",2]]],[10.5,5.83,5,[["g",2]]],[10.5,6.33,5,0,10.67,10]]],["h",7.9,10.3,315,"",0,2,0],["c",12.6,10.2,270,"",0],["table",10.7,9.2,0,"",0],["shelf",13.6,8.6,90,"",0],["label",16.5,5.05,0,"Hallway",0],["label",10.5,10.6,0,"Room",0]],"a":[],"s":[]};
