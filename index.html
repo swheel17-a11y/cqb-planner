@@ -761,6 +761,34 @@ function syncAnchoredSteps(){
     st.never = t==null; st.t = t==null ? 1e6 : t; }
   if(any) S.steps.sort((a,b) => a.t-b.t);
 }
+// everything pinned to a spot on someone's route: route notes and "move when he reaches" pins
+function routeAnchors(it){
+  const out = S.steps.filter(st => st.who===it.id);
+  for(const q of S.items){ if(!isPerson(q)) continue;
+    for(const list of [q.acts, ...(q.path||[]).map(w => w.acts)]) for(const a of (list||[])) if(a.k==='wloc' && a.who===it.id) out.push(a); }
+  return out;
+}
+// adds a waypoint on leg `seg` at fraction f; the waypoints after it keep their order, so the route stays chronological
+function insertWaypoint(it, seg, f){
+  const pts = routePts(it), A = pts[seg], B = pts[seg+1]; if(!B) return -1;
+  const x = snap(A.x + (B.x-A.x)*f, 1/6), y = snap(A.y + (B.y-A.y)*f, 1/6), next = it.path[seg];
+  const L = Math.hypot(B.x-A.x, B.y-A.y), t = L ? clamp(Math.hypot(x-A.x, y-A.y)/L, 0.001, 0.999) : 0.5;
+  for(const a of routeAnchors(it)){ if(a.seg > seg) a.seg++;
+    else if(a.seg===seg){ const af = a.f||0; if(af <= t) a.f = r2(af/t); else { a.seg = seg+1; a.f = r2((af-t)/(1-t)); } } }
+  it.path.splice(seg, 0, {x, y, sp:next.sp, w:0, go:'', g:null});
+  return seg;
+}
+function deleteWaypoint(it, i){
+  const pts = routePts(it), n = it.path.length;
+  for(const a of routeAnchors(it)){
+    if(a.seg > i+1) a.seg--;
+    else if(a.seg===i || a.seg===i+1){
+      if(i===n-1){ if(a.seg===i){ a.seg = Math.max(0, i-1); a.f = i>0 ? 1 : 0; } continue; }
+      const P = pts[a.seg], Q = pts[a.seg+1], wx = P.x + (Q.x-P.x)*(a.f||0), wy = P.y + (Q.y-P.y)*(a.f||0);
+      const A = pts[i], B = pts[i+2], vx = B.x-A.x, vy = B.y-A.y, L = vx*vx + vy*vy;
+      a.seg = i; a.f = r2(L ? clamp(((wx-A.x)*vx + (wy-A.y)*vy)/L, 0, 1) : 0); } }
+  it.path.splice(i, 1); if(!it.path.length) delete it.path;
+}
 function nearestRoute(x, y, tol, only){
   let best = null;
   for(const it of S.items){ if(!isPerson(it) || !it.path || !it.path.length || (only && it!==only)) continue;
@@ -1286,6 +1314,9 @@ function drawPlan(){
     ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.fillText(text, bx + tw/2, y+0.5); };
   // routes, waypoints, look points
   const sp = selPerson(), R0 = clamp(0.3*sc, 8, 20), SC2 = sched();
+  // while picking a "move when he reaches" spot, the man he's keying off is the one to look at
+  const pickWho = (() => { if(!lookArm || !lookArm.route) return null; const o = getItem(lookArm.id), ow = o && (lookArm.i < 0 ? o : o.path && o.path[lookArm.i]), a = ow && ow.acts && ow.acts[lookArm.a]; return a ? getItem(a.who) : null; })();
+  const focus = pickWho || sp;
   const drawLooks = (it, acts, p, col, owner) => { (acts||[]).forEach(a => {
       if(a.k==='wloc' && a.set){ const w = getItem(a.who), pts = w && routePts(w); if(!pts || !pts[a.seg+1]) return;
         const A = pts[a.seg], Bp = pts[a.seg+1], q = toScreen(A.x+(Bp.x-A.x)*a.f, A.y+(Bp.y-A.y)*a.f);
@@ -1309,8 +1340,12 @@ function drawPlan(){
     const hasPath = it.path && it.path.length, isSel = sp===it;
     if(!hasPath && !(isSel && it.acts && it.acts.length)) continue;
     const col = pColor(it,C), pts = [{x:it.x,y:it.y}, ...(it.path||[])].map(p => toScreen(p.x,p.y));
+    const isPick = pickWho===it, ghost = focus && focus!==it && !(pickWho && isSel);
     if(hasPath){
-      ctx.strokeStyle = col; ctx.globalAlpha = isSel ? 0.9 : 0.4; ctx.lineWidth = isSel ? 2.4 : 1.6; ctx.lineJoin='round';
+      if(isPick){ ctx.save(); ctx.strokeStyle = C.accent; ctx.globalAlpha = 0.28; ctx.lineWidth = 12; ctx.lineJoin = ctx.lineCap = 'round';
+        ctx.beginPath(); pts.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.stroke(); ctx.restore();
+        pill(pts[0].x, pts[0].y - R0 - 22, 'TAP ' + tagOf(it) + '’S ROUTE', C.accent, tok('--accent-ink')); }
+      ctx.strokeStyle = isPick ? C.accent : col; ctx.globalAlpha = isPick ? 1 : isSel ? (pickWho ? 0.35 : 0.9) : ghost ? 0.12 : 0.4; ctx.lineWidth = isPick ? 3 : isSel ? 2.4 : 1.6; ctx.lineJoin='round';
       ctx.beginPath(); pts.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.stroke();
       for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i], L = Math.hypot(b.x-a.x,b.y-a.y); if(L<26) continue;
         const mx=(a.x+b.x)/2, my=(a.y+b.y)/2, an = Math.atan2(b.y-a.y,b.x-a.x), q = 5;
@@ -1320,11 +1355,11 @@ function drawPlan(){
     const ps0 = pts[0];
     if(TIME > 0.001 && hasPath){ ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.arc(ps0.x,ps0.y,R0*0.8,0,7); ctx.stroke(); ctx.setLineDash([]);
       if(isSel) hits.push({kind:'start', it, x:ps0.x, y:ps0.y, rx:R0, ry:R0}); }
-    if(isSel){ drawLooks(it, it.acts, ps0, col, -1); drawActBadges(ctx, ps0, it.acts, col, C, R0); }
+    if(isSel && !pickWho){ drawLooks(it, it.acts, ps0, col, -1); drawActBadges(ctx, ps0, it.acts, col, C, R0); }
     const arrT = SC2.map.get(it.id);
     (it.path||[]).forEach((w,i) => {
       const p = pts[i+1], wsel = sel && sel.type==='wp' && sel.id===it.id && sel.i===i;
-      if(isSel && w.lx!=null){ const lq = toScreen(w.lx,w.ly);
+      if(isSel && !pickWho && w.lx!=null){ const lq = toScreen(w.lx,w.ly);
         ctx.strokeStyle = col; ctx.globalAlpha = wsel?0.85:0.45; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(lq.x,lq.y); ctx.stroke(); ctx.setLineDash([]);
         drawEye(ctx, lq.x, lq.y, col, C, wsel, true); ctx.globalAlpha = 1;
         hits.push({kind:'look', it, i, x:lq.x, y:lq.y, rx:15, ry:15}); }
@@ -1332,11 +1367,11 @@ function drawPlan(){
         ctx.globalAlpha = 0.75; drawEye(ctx, hx, hy, col, C, false, false); ctx.globalAlpha = 1;
         ctx.font = '600 10px "Barlow Condensed", sans-serif'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left'; ctx.fillText('DRAG TO SET FACING', hx + 12, hy + 3); ctx.textAlign = 'center';
         hits.push({kind:'lookNew', it, i, x:hx, y:hy, rx:15, ry:15}); }
-      if(isSel) drawLooks(it, w.acts, p, col, i);
+      if(isSel && !pickWho) drawLooks(it, w.acts, p, col, i);
       const r = isSel ? (wsel?7:5) : 3;
-      ctx.fillStyle = wsel ? C.accent : col; ctx.globalAlpha = isSel?1:0.5; ctx.beginPath(); ctx.arc(p.x,p.y,r,0,7); ctx.fill();
+      ctx.fillStyle = wsel ? C.accent : isPick ? C.accent : col; ctx.globalAlpha = isSel||isPick ? 1 : ghost ? 0.15 : 0.5; ctx.beginPath(); ctx.arc(p.x,p.y,isPick?4:r,0,7); ctx.fill();
       if(isSel){ ctx.strokeStyle = C.sheet; ctx.lineWidth = 1.5; ctx.stroke(); } ctx.globalAlpha = 1;
-      if(isSel){ drawActBadges(ctx, p, w.acts, col, C, r);
+      if(isSel && !pickWho){ drawActBadges(ctx, p, w.acts, col, C, r);
         if(arrT && arrT.arr[i]!=null){ ctx.font = '500 10px "JetBrains Mono", monospace'; ctx.textAlign='left'; ctx.fillStyle = C.ink2; ctx.fillText(arrT.arr[i].toFixed(1)+'s', p.x+8, p.y-8); ctx.textAlign='center'; }
         hits.push({kind:'wp', it, i, x:p.x, y:p.y, rx:13, ry:13}); }
     });
@@ -1518,13 +1553,23 @@ function lineWalls(g0,g1){
   else { const x=g0.x; for(let y=Math.min(g0.y,g1.y); y<Math.max(g0.y,g1.y); y++) setEdge('v',x,y,'w'); }
 }
 function axisEnd(g0,g1){ return Math.abs(g1.x-g0.x) >= Math.abs(g1.y-g0.y) ? {x:g1.x,y:g0.y} : {x:g0.x,y:g1.y}; }
-function select(s){ sel = s; renderInspector(); drawPlan(); }
+function select(s){ sel = s; renderInspector(); drawPlan(); updateHint(); }
 function simplify(pts, eps){
   if(pts.length < 3) return pts.slice();
   let maxD = 0, idx = 0; const a = pts[0], b = pts[pts.length-1];
   for(let i=1;i<pts.length-1;i++){ const d = distSeg(pts[i].x,pts[i].y,a.x,a.y,b.x,b.y); if(d>maxD){ maxD=d; idx=i; } }
   if(maxD > eps){ const l = simplify(pts.slice(0,idx+1), eps), r = simplify(pts.slice(idx), eps); return l.slice(0,-1).concat(r); }
   return [a,b];
+}
+// tap on the selected man's route (between waypoints) to drop a new waypoint there and drag it into place
+function routeInsertOp(h, sx, sy){
+  if(h && !(h.kind==='edge' || (h.kind==='item' && !isPerson(h.it)))) return null;
+  const it = selPerson(); if(!it || !it.path || !it.path.length) return null;
+  const p = toWorld(sx,sy), nr = nearestRoute(p.x, p.y, Math.max(0.3, 11/V.sc), it); if(!nr) return null;
+  checkpoint(); const i = insertWaypoint(it, nr.seg, nr.f); if(i < 0){ undoStack.pop(); updateUndo(); return null; }
+  sel = {type:'wp', id:it.id, i}; changed(); renderInspector(); toast('Waypoint added · drag to move it');
+  const w = it.path[i];
+  return {move(x,y){ if(Math.hypot(x-sx,y-sy)<4) return; const q = toWorld(x,y); w.x = snap(q.x,1/6); w.y = snap(q.y,1/6); changed(); }, up(){ renderInspector(); }};
 }
 // drag handlers shared by Move and Path tools
 function dragOps(h, sx, sy){
@@ -1570,6 +1615,7 @@ function startTool(sx,sy){
   switch(tool){
     case 'select': {
       const h = hitTest(sx,sy);
+      { const ins = routeInsertOp(h, sx, sy); if(ins) return ins; }
       if(!h){ if(sel) select(null); return panOp(sx,sy); }
       const d = dragOps(h, sx, sy); if(d) return d;
       if(h.kind==='handle'){ const it=h.it; let first=true; return {move(x,y){ if(first){checkpoint(); first=false;} const w=toWorld(x,y); it.r = (snap(deg(Math.atan2(w.y-it.y,w.x-it.x)),15)+360)%360; changed(); }, up(){ renderInspector(); }}; }
@@ -1588,6 +1634,7 @@ function startTool(sx,sy){
       const h = hitTest(sx,sy);
       if(h && h.kind==='item' && isPerson(h.it)){ select({type:'item', id:h.it.id}); return null; }
       if(h){ const d = dragOps(h, sx, sy); if(d) return d; }
+      { const ins = routeInsertOp(h, sx, sy); if(ins) return ins; }
       const it = selPerson();
       if(!it){ toast('Tap a person first, then draw their route'); return null; }
       const last = it.path && it.path.length ? it.path[it.path.length-1] : {x:it.x, y:it.y};
@@ -1641,7 +1688,7 @@ function startTool(sx,sy){
       let first = true;
       const er = (x,y) => { const h = hitTest(x,y,{handles:false}); let did=false;
         const pre = () => { if(first){ checkpoint(); first=false; } };
-        if(h && h.kind==='wp'){ pre(); h.it.path.splice(h.i,1); if(!h.it.path.length) delete h.it.path; did=true; }
+        if(h && h.kind==='wp'){ pre(); deleteWaypoint(h.it, h.i); did=true; }
         else if(h && h.kind==='look'){ pre(); const w = h.it.path[h.i]; delete w.lx; delete w.ly; did=true; }
         else if(h && h.kind==='wloc'){ pre(); h.act.set = 0; did=true; }
         else if(h && h.kind==='alook'){ pre(); const list = h.owner<0 ? h.it.acts : h.it.path[h.owner].acts; const ix = list ? list.indexOf(h.act) : -1; if(ix>=0) list.splice(ix,1); did=true; }
@@ -2594,6 +2641,7 @@ function updateHint(){
   if(READONLY){ h.textContent = 'View only · tap a person to see their moves · press play'; return; }
   if(lookArm) h.textContent = lookArm.route ? 'Tap the spot on his route that sets this man moving' : lookArm.door ? 'Tap the door' : lookArm.bang ? 'Tap where the flashbang should land' : 'Tap the spot he should look at';
   else if(TIME > 0.001 && !playing && tool!=='note') h.textContent = `Showing ${TIME.toFixed(1)} s · routes and waypoints still edit · ⏮ to go back to the start`;
+  else if((tool==='select' || tool==='path') && selPerson() && selPerson().path && selPerson().path.length) h.textContent = tool==='path' ? 'Tap or drag to extend his route · tap his route line to add a point in between' : 'Tap his route line to add a waypoint · drag waypoints to move them';
   else h.textContent = tool==='object' ? `Tap the plan to place: ${FURN[furnKind].n.toLowerCase()}` : HINTS[tool];
 }
 function updatePlayBtn(){ const b = $('#tl-play'); b.setAttribute('aria-label', playing?'Pause':'Play'); b.title = playing?'Pause':'Play';
@@ -3217,7 +3265,7 @@ const TOUR = [
   {sel:'#tool-room', t:'Build the structure', b:'<b>Room</b>: drag corner to corner for four walls. <b>Wall</b> draws a single wall. <b>Door</b>, <b>Opening</b> and <b>Window</b>: tap onto a wall. Tap a door again to change its swing.'},
   {sel:'#tool-object', t:'Furniture and cover', b:'Couches, tables, wardrobes, crates and more. Tall items, drawn with an <b>X</b>, block line of sight. Low ones only hide a kneeling man.'},
   {sel:'#tool-f', t:'Place people', b:'<b>Friendly</b>, <b>Hostile</b> and <b>Civilian</b>: tap the plan to place one. Drag the orange dot to set which way he faces. Tap a person to set his tag, gun posture and stance.'},
-  {sel:'#tool-path', t:'Plan their moves', b:'Pick <b>Path</b>, tap a person, then tap or drag to draw his route. Tap a waypoint to set his <b>speed</b> and <b>facing</b> (drag the eye to where he should look).'},
+  {sel:'#tool-path', t:'Plan their moves', b:'Pick <b>Path</b>, tap a person, then tap or drag to draw his route. Tap his route line to <b>add a point in between</b>. Tap a waypoint to set his <b>speed</b> and <b>facing</b> (drag the eye to where he should look).'},
   {sel:'#tools', t:'Actions make it a plan', b:'At each waypoint, add actions that run in order: <b>look</b> or <b>sweep</b>, change <b>gun posture</b>, <b>signal</b> a teammate (nod, tricep squeeze), <b>open a door</b>, <b>throw a flashbang</b>. Then chain the team: <b>wait for signal</b>, <b>wait for door</b>, <b>move with</b>, <b>move when he reaches</b> a spot, <b>move on bang</b>.'},
   {sel:'#timeline', t:'Play it back', b:'Press <b>play</b> to run the plan. Drag the slider to any moment. The markers show notes, gates and flashbangs. <b>Steps</b> lists every note.'},
   {sel:'#tool-note', t:'Notes for the team', b:'Pick <b>Note</b> and tap right on someone’s route. The note pops up when he gets there, pauses the playback, and goes away when you press <b>Continue</b>.'},
