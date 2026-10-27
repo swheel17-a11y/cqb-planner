@@ -120,6 +120,15 @@ body.ro .timeline{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
 .lib-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lib-main input{padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--sheet)}
 #lib-list{display:flex;flex-direction:column}
+#tour{position:fixed;inset:0;z-index:50}
+#tour-spot{position:fixed;border-radius:10px;box-shadow:0 0 0 9999px rgba(10,12,10,.62);outline:2px solid var(--accent);outline-offset:2px;transition:left .25s,top .25s,width .25s,height .25s;pointer-events:none}
+#tour-spot.none{left:50%!important;top:50%!important;width:0!important;height:0!important;outline:0}
+#tour-card{position:fixed;width:min(360px,calc(100vw - 16px));background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.35);padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+#tour-card h3{margin:0;font-family:var(--f-display);font-weight:400;font-size:20px;letter-spacing:.02em;text-wrap:balance}
+#tour-card p{margin:0;font-size:14.5px;line-height:1.5;color:var(--ink-2)}
+#tour-card p b{color:var(--ink)}
+.chip.help{min-width:30px;justify-content:center;font-family:var(--f-ui);font-weight:700}
+@media (prefers-reduced-motion:reduce){#tour-spot{transition:none}}
 .keys{font-family:var(--f-mono);font-size:12px;color:var(--ink-2)}
 .bar{display:flex;align-items:center;gap:10px;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--panel);border-bottom:1px solid var(--line);min-width:0}
 .mark{font-family:var(--f-display);font-size:22px;letter-spacing:.04em;line-height:1;color:var(--ink);white-space:nowrap}
@@ -276,6 +285,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
       <button class="chip cones" id="btn-drone" aria-pressed="false" hidden title="Drone camera that follows the team">Drone view</button>
       <button class="chip" id="btn-camlist" hidden>Camera…</button>
       <button class="chip" id="btn-fit">Fit</button>
+      <button class="chip help" id="btn-help" title="Show the tour" aria-label="Show the tour">?</button>
     </div>
     <div class="hud hud-bl" id="hud-legend">
       <span class="chip legend">
@@ -444,6 +454,16 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
         <p>Your list lives in this browser on this device. If the browser’s data is cleared it goes with it, so export a backup now and then. Import one to bring your scenarios to another phone or computer.</p>
         <div class="row"><button class="btn" id="lib-export">Export all</button><span class="btn filebtn">Import a backup…<input type="file" id="lib-import" accept=".json,application/json"></span></div>
       </div>
+    </div>
+  </div>
+
+  <div id="tour" hidden role="dialog" aria-modal="true" aria-labelledby="tour-title">
+    <div id="tour-spot"></div>
+    <div id="tour-card">
+      <div class="eyebrow" id="tour-count"></div>
+      <h3 id="tour-title"></h3>
+      <p id="tour-body"></p>
+      <div class="row"><button class="btn" id="tour-skip">Skip tour</button><span style="flex:1"></span><button class="btn" id="tour-back">Back</button><button class="btn primary" id="tour-next">Next</button></div>
     </div>
   </div>
 
@@ -3188,6 +3208,67 @@ $('#lib-import').addEventListener('change', e => { const f = e.target.files && e
     }catch(err){ toast('That isn’t a scenarios backup file'); } };
   rd.readAsText(f); e.target.value = ''; });
 
+/* ---------------- guided tour ----------------
+   Spotlights one part of the screen at a time with a short explanation. Steps whose target isn't on screen
+   (for example the tools in a view-only scenario) are skipped. Opens by itself on a first visit. */
+const TOUR = [
+  {t:'Welcome to the shoot house planner', b:'This short tour shows the basics: building a layout, placing your team, planning their moves, playing it back and sharing it. About two minutes. Replay it any time from the <b>?</b> button.'},
+  {sel:'#plan', t:'The plan', b:'Everything happens on this grid. <b>One square is 3 ft.</b> Drag empty space to move around, pinch or scroll to zoom, and tap <b>Fit</b> to see the whole layout.'},
+  {sel:'#tool-room', t:'Build the structure', b:'<b>Room</b>: drag corner to corner for four walls. <b>Wall</b> draws a single wall. <b>Door</b>, <b>Opening</b> and <b>Window</b>: tap onto a wall. Tap a door again to change its swing.'},
+  {sel:'#tool-object', t:'Furniture and cover', b:'Couches, tables, wardrobes, crates and more. Tall items, drawn with an <b>X</b>, block line of sight. Low ones only hide a kneeling man.'},
+  {sel:'#tool-f', t:'Place people', b:'<b>Friendly</b>, <b>Hostile</b> and <b>Civilian</b>: tap the plan to place one. Drag the orange dot to set which way he faces. Tap a person to set his tag, gun posture and stance.'},
+  {sel:'#tool-path', t:'Plan their moves', b:'Pick <b>Path</b>, tap a person, then tap or drag to draw his route. Tap a waypoint to set his <b>speed</b> and <b>facing</b> (drag the eye to where he should look).'},
+  {sel:'#tools', t:'Actions make it a plan', b:'At each waypoint, add actions that run in order: <b>look</b> or <b>sweep</b>, change <b>gun posture</b>, <b>signal</b> a teammate (nod, tricep squeeze), <b>open a door</b>, <b>throw a flashbang</b>. Then chain the team: <b>wait for signal</b>, <b>wait for door</b>, <b>move with</b>, <b>move when he reaches</b> a spot, <b>move on bang</b>.'},
+  {sel:'#timeline', t:'Play it back', b:'Press <b>play</b> to run the plan. Drag the slider to any moment. The markers show notes, gates and flashbangs. <b>Steps</b> lists every note.'},
+  {sel:'#tool-note', t:'Notes for the team', b:'Pick <b>Note</b> and tap right on someone’s route. The note pops up when he gets there, pauses the playback, and goes away when you press <b>Continue</b>.'},
+  {sel:'#btn-cones', t:'See what they see', b:'<b>View cones</b> show where everyone is looking. <b>Threat view</b> shades what the hostiles can see. Tap a person and choose <b>Show what they see</b> to shade his dead space.'},
+  {sel:'.modes', t:'3D and Walk', b:'<b>3D</b> shows the run from above; try <b>Drone</b>, a camera that follows the team. <b>Walk</b> puts you at eye level, or rides along with one shooter.'},
+  {sel:'#btn-share', t:'Send it to the team', b:'Copy a <b>share link</b> to text or post, choose <b>view only</b> or <b>editable</b>, save a file, or <b>record a video</b> anyone can watch.'},
+  {sel:'#btn-lib', t:'My scenarios', b:'Save scenarios on this device and reopen them later. Export a backup now and then.'},
+  {sel:'#btn-help', t:'That’s the basics', b:'Open the <b>Hall boss</b> or <b>T-intersection</b> drill under <b>Send or open → Start over</b> to see a full plan, and replay this tour from here any time.'}
+];
+let tourI = -1;
+const tclamp = (v,a,b) => Math.max(a, Math.min(b, v));
+function tourVisible(el){ if(!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; }
+function tourShow(i, dir){
+  const box = $('#tour'), spot = $('#tour-spot'), card = $('#tour-card');
+  while(i >= 0 && i < TOUR.length && TOUR[i].sel && !tourVisible(document.querySelector(TOUR[i].sel))) i += dir || 1;
+  if(i < 0) i = 0;
+  if(i >= TOUR.length){ tourEnd(); return; }
+  tourI = i; const st = TOUR[i];
+  $('#tour-title').textContent = st.t; $('#tour-body').innerHTML = st.b;
+  $('#tour-count').textContent = `${i+1} of ${TOUR.length}`;
+  $('#tour-back').disabled = i===0; $('#tour-next').textContent = i===TOUR.length-1 ? 'Done' : 'Next';
+  box.hidden = false;
+  const el = st.sel && document.querySelector(st.sel);
+  if(el && el.closest('#tools')) el.scrollIntoView({block:'nearest', inline:'center'});
+  requestAnimationFrame(() => {
+    const vw = innerWidth, vh = innerHeight, cr = card.getBoundingClientRect();
+    if(el){ const r = el.getBoundingClientRect(), pad = 6;
+      const x = Math.max(4, r.left - pad), y = Math.max(4, r.top - pad), w = Math.min(vw - 8, r.width + pad*2), h = Math.min(vh - 8, r.height + pad*2);
+      Object.assign(spot.style, {left:x+'px', top:y+'px', width:w+'px', height:h+'px'}); spot.classList.remove('none');
+      const below = y + h + 12, above = y - cr.height - 12;
+      let top = below + cr.height <= vh - 8 ? below : above >= 8 ? above : Math.max(8, (vh - cr.height)/2);
+      let left = tclamp(x + w/2 - cr.width/2, 8, vw - cr.width - 8);
+      if(h > vh*0.6){ top = Math.max(8, Math.min(vh - cr.height - 8, y + 24)); left = tclamp(x + 24, 8, vw - cr.width - 8); }
+      Object.assign(card.style, {left:left+'px', top:top+'px'});
+    } else { spot.classList.add('none'); Object.assign(card.style, {left:Math.max(8,(vw-cr.width)/2)+'px', top:Math.max(8,(vh-cr.height)/2)+'px'}); }
+    $('#tour-next').focus();
+  });
+}
+function tourStart(){
+  document.querySelectorAll('.overlay').forEach(o => { o.hidden = true; });
+  if(mode!=='plan') setMode('plan'); pause(); hidePicker(); select(null); setTool('select');
+  tourShow(0, 1);
+}
+function tourEnd(){ $('#tour').hidden = true; tourI = -1; try{ localStorage.setItem('cqb-tour-done', '1'); }catch(e){} }
+$('#tour-next').addEventListener('click', () => tourShow(tourI + 1, 1));
+$('#tour-back').addEventListener('click', () => tourShow(tourI - 1, -1));
+$('#tour-skip').addEventListener('click', tourEnd);
+$('#btn-help').addEventListener('click', tourStart);
+window.addEventListener('resize', () => { if(tourI >= 0) tourShow(tourI, 1); });
+window.addEventListener('keydown', e => { if(tourI < 0) return; if(e.key==='Escape'){ tourEnd(); e.stopPropagation(); } else if(e.key==='ArrowRight'){ tourShow(tourI+1, 1); } else if(e.key==='ArrowLeft'){ tourShow(tourI-1, -1); } }, true);
+
 // the scenario a fresh copy of the planner opens with
 const DEFAULT_SCENARIO = {"v":3,"ro":0,"t":"Drill · Hall boss gives up the door","n":"EXAMPLE DRILL — adjust spacing, timing and calls to your SOP.\n\nThe sequence:\n• #1 (hall boss) reaches the threshold with his gun trained on the door.\n• He relinquishes the door by looking back down the hallway. That opens the gate “Door”.\n• #2 is holding on gate “Door”. Once it opens he flows in and buttons left. #3 follows and buttons right; #4 flows opposite the gun in front of him.\n\nTap a shooter, then a waypoint, to see the actions that make this happen.","w":20,"h":12,"e":[["h",1,4,"w",0,0],["h",2,4,"w",0,0],["h",3,4,"w",0,0],["h",4,4,"w",0,0],["h",5,4,"w",0,0],["h",6,4,"w",0,0],["h",7,4,"w",0,0],["h",8,4,"w",0,0],["h",9,4,"w",0,0],["h",10,4,"w",0,0],["h",11,4,"w",0,0],["h",12,4,"w",0,0],["h",13,4,"w",0,0],["h",14,4,"w",0,0],["h",15,4,"w",0,0],["h",16,4,"w",0,0],["h",17,4,"w",0,0],["h",18,4,"w",0,0],["h",1,6,"w",0,0],["h",2,6,"w",0,0],["h",3,6,"w",0,0],["h",4,6,"w",0,0],["h",5,6,"w",0,0],["h",6,6,"w",0,0],["h",7,6,"w",0,0],["h",8,6,"w",0,0],["h",9,6,"w",0,0],["h",11,6,"w",0,0],["h",12,6,"w",0,0],["h",13,6,"w",0,0],["h",14,6,"w",0,0],["h",15,6,"w",0,0],["h",16,6,"w",0,0],["h",17,6,"w",0,0],["h",18,6,"w",0,0],["v",1,4,"w",0,0],["v",1,5,"w",0,0],["v",7,6,"w",0,0],["v",7,7,"w",0,0],["v",7,8,"w",0,0],["v",7,9,"w",0,0],["v",7,10,"w",0,0],["v",14,6,"w",0,0],["v",14,7,"w",0,0],["v",14,8,"w",0,0],["v",14,9,"w",0,0],["v",14,10,"w",0,0],["h",7,11,"w",0,0],["h",8,11,"w",0,0],["h",9,11,"w",0,0],["h",10,11,"w",0,0],["h",11,11,"w",0,0],["h",12,11,"w",0,0],["h",13,11,"w",0,0]],"i":[["f",5,4.33,0,"1",0,2,0,[[9,4.33,5,[["w",1],["o","Door"],["l",13,5,0]],12,6.67],[10.5,6,5,[["l",13,5.17,0.5]],13,5]]],["f",5,5.5,0,"2",0,2,0,[[9,5.5,5,[["q","Door"]],16.83,5.5],[10.17,6,5,0,10.33,7.33],[10.17,6.33,5,[["l",7.17,6.33,0]],7.5,6.33],[9.5,6.33,5,[["l",9.5,10,0.5]]]]],["f",4.5,5.5,0,"3",0,1,0,[[8.83,5.5,5,[["q","Door"]]],[9.33,5.67,5,[["g",2]],13.5,6.17],[10.5,6.17,5,[["g",2]],13.67,6.17],[11.17,6.17,5,[["l",11,10.17,0.5]],13.67,6.33]]],["f",4,5.5,0,"4",0,1,0,[[8.67,5.5,5,[["q","Door"],["g",2]]],[10.5,5.83,5,[["g",2]]],[10.5,6.33,5,0,10.67,10]]],["h",7.9,10.3,315,"",0,2,0],["c",12.6,10.2,270,"",0],["table",10.7,9.2,0,"",0],["shelf",13.6,8.6,90,"",0],["label",16.5,5.05,0,"Hallway",0],["label",10.5,10.6,0,"Room",0]],"a":[],"s":[]};
 $('#btn-default').addEventListener('click', () => confirmAsk('Replace this layout with the default scenario?', 'Load default', () => {
@@ -3200,6 +3281,8 @@ $('#btn-default').addEventListener('click', () => confirmAsk('Replace this layou
   setReadOnly(!!(EMBEDDED && EMBEDDED.ro)); setShareMode(true);
   setTool('select'); updateUndo(); resizePlan(); changed(); syncBrief();
   if(EMBEDDED) openSheet('brief');
+  let toured = false; try{ toured = !!localStorage.getItem('cqb-tour-done'); }catch(e){}
+  if(!toured && !EMBEDDED && !/#s=/.test(location.hash||'')) setTimeout(tourStart, 600);
   const hs = (location.hash || '').match(/#s=(CQB[01]\.[A-Za-z0-9_-]+)/);
   if(hs) decodeCode(hs[1]).then(d => { loadScenario(d); openSheet('brief'); try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){} })
     .catch(() => toast('That scenario link is damaged · ask for it again'));
