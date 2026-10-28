@@ -5,3 +5,8 @@ A browser-based planner for close-quarters training. Lay out a structure on a 3 
 **Open it:** https://swheel17-a11y.github.io/cqb-planner/
 
 The whole planner is the single file `index.html`. Scenarios people make are saved in their own browser, not in this repository.
+
+## Accounts (Firebase)
+
+Sign-in and online scenarios use the Firebase project `cqb-planner` (Authentication + Cloud Firestore).
+The database rules are in `firestore.rules`; paste them into Firebase console → Firestore Database → Rules → Publish.

@@ -114,6 +114,22 @@ body.ro .timeline{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
 .cam-row input{width:72px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--sheet);font-family:var(--f-mono);font-size:13px}
 .chip.cam{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .seg button:disabled{opacity:.4;cursor:default}
+.ib.acct{position:relative}
+.ib.acct.on svg{opacity:0}
+#acct-initial{position:absolute;inset:5px;border-radius:50%;display:none;place-items:center;background:var(--accent);color:var(--accent-ink);font:700 14px var(--f-cond)}
+.ib.acct.on #acct-initial{display:grid}
+.acct-form{display:flex;flex-direction:column;gap:12px}
+.acct-form.busy,#lib.busy .sheet{opacity:.6;pointer-events:none}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:10px;background:var(--sheet)}
+.gbtn svg{width:20px;height:20px;flex:none}
+.acct-or{display:flex;align-items:center;gap:10px;color:var(--ink-2);font-size:13px}
+.acct-or::before,.acct-or::after{content:"";flex:1;height:1px;background:var(--line)}
+.acct-err{margin:0;padding:9px 12px;border-radius:8px;background:color-mix(in srgb,var(--accent) 14%,transparent);font-size:14px}
+button.link{background:none;border:0;padding:4px 2px;color:var(--accent);font-weight:600;text-decoration:underline;font-size:14px}
+.lib-local{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.lib-local h3{margin:0;font-size:15px}
+#short-link{min-height:0;height:auto;resize:none;font-family:var(--f-mono);font-size:13px}
+a.btn{text-decoration:none;display:inline-block}
 .lib-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .lib-row.cur .lib-main b{color:var(--accent)}
 .lib-main{flex:1 1 180px;min-width:0;display:flex;flex-direction:column}
@@ -262,6 +278,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
     <div class="acts">
       <button class="ib" id="btn-undo" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 6L4 11l5 5"/><path d="M4 11h10a5 5 0 0 1 0 10h-3"/></svg></button>
       <button class="ib hide-narrow" id="btn-redo" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 6l5 5-5 5"/><path d="M20 11H10a5 5 0 0 0 0 10h3"/></svg></button>
+      <button class="ib acct" id="btn-acct" title="Sign in" aria-label="Sign in"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span id="acct-initial" aria-hidden="true"></span></button>
       <button class="ib" id="btn-lib" title="My scenarios" aria-label="My scenarios"><svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/></svg></button>
       <button class="ib" id="btn-brief" title="Briefing" aria-label="Briefing"><svg viewBox="0 0 24 24"><path d="M9 3h6v3H9z"/><path d="M7 5H5v16h14V5h-2"/><path d="M8 11h8M8 15h5"/></svg></button>
       <button class="ib primary" id="btn-share" title="Send or open" aria-label="Send or open"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 14v6h14v-6"/></svg></button>
@@ -355,8 +372,17 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
           <p id="share-mode-help"></p>
         </div>
         <div class="block">
-          <h3>Share link</h3>
-          <p>The easiest way to send it: a link that opens this scenario on the planner’s website, always the newest version. Paste it into a text or Discord.</p>
+          <h3>Short link</h3>
+          <div id="short-off" hidden><p>Short links work on the planner’s website, where you can sign in. The long link below opens this scenario there.</p></div>
+          <div id="short-out" hidden><p>Sign in and this becomes a short link like <b>…/cqb-planner/#p=k7q2mxw4ta</b>. Fix the scenario later and everyone with the link sees the change.</p>
+            <div class="row"><button class="btn primary" id="short-signin">Sign in</button></div></div>
+          <div id="short-in" hidden><p id="short-help"></p>
+            <textarea id="short-link" readonly aria-label="Short link" rows="1" hidden></textarea>
+            <div class="row"><button class="btn primary" id="short-make">Get the link</button><button class="btn" id="short-copy" hidden>Copy link</button></div></div>
+        </div>
+        <div class="block">
+          <h3>Long link</h3>
+          <p>No account needed: the whole scenario is packed into the link. It opens on the planner’s website. Paste it into a text or Discord.</p>
           <textarea id="link-out" readonly aria-label="Share link"></textarea>
           <div class="row"><button class="btn primary" id="btn-copy-link">Copy link</button></div>
         </div>
@@ -444,9 +470,32 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
     </div>
   </div>
 
+  <div class="overlay" id="acct" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="acct-h">
+      <div class="sheet-head"><div><div class="eyebrow">Account</div><h2 id="acct-h">Sign in</h2></div><button class="ib" data-close="acct" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div id="acct-offsite" hidden><p>Sign-in works on the planner’s website. Open it there to keep your scenarios online and get short links.</p>
+        <div class="row"><a class="btn primary" href="https://swheel17-a11y.github.io/cqb-planner/" target="_blank" rel="noopener">Open the website</a></div></div>
+      <div id="acct-out" class="acct-form">
+        <p style="margin:0">Sign in to keep My scenarios online, open them on any phone or computer, and send short links.</p>
+        <button class="btn wide gbtn" id="acct-google"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.5 12.3c0-.8-.1-1.5-.2-2.3H12v4.3h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-1.9 3.2-4.8 3.2-8z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.6-2.7c-1 .7-2.2 1.1-3.7 1.1-2.8 0-5.2-1.9-6.1-4.5H2.2v2.8A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.9 14.2a6.6 6.6 0 0 1 0-4.3V7.1H2.2a11 11 0 0 0 0 9.9z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3 .5 4.1 1.6l3.1-3.1A11 11 0 0 0 2.2 7.1l3.7 2.8C6.8 7.3 9.2 5.4 12 5.4z"/></svg>Continue with Google</button>
+        <div class="acct-or"><span>or use email</span></div>
+        <div class="field"><label for="acct-email">Email</label><input id="acct-email" type="email" autocomplete="email" inputmode="email"></div>
+        <div class="field"><label for="acct-pw">Password</label><input id="acct-pw" type="password" autocomplete="current-password" minlength="6"></div>
+        <div class="row"><button class="btn primary" id="acct-signin">Sign in</button><button class="btn" id="acct-create">Create account</button><button class="link" id="acct-reset">Forgot password?</button></div>
+      </div>
+      <div id="acct-in" hidden>
+        <p style="margin:0">Signed in as <b id="acct-who"></b>.</p>
+        <p class="small" style="margin:0">Your scenarios are saved to your account. Sign in with the same account on any phone or computer to open them.</p>
+        <div class="row"><button class="btn primary" id="acct-lib">My scenarios</button><button class="btn" id="acct-signout">Sign out</button></div>
+      </div>
+      <p class="acct-err" id="acct-err" role="alert" hidden></p>
+    </div>
+  </div>
+
   <div class="overlay" id="lib" hidden>
     <div class="sheet" role="dialog" aria-labelledby="lib-h">
-      <div class="sheet-head"><div><div class="eyebrow">Saved on this device</div><h2 id="lib-h">My scenarios</h2></div><button class="ib" data-close="lib" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="sheet-head"><div><div class="eyebrow" id="lib-eyebrow">Saved on this device</div><h2 id="lib-h">My scenarios</h2></div><button class="ib" data-close="lib" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <p class="small" id="lib-acct" style="margin:0"></p>
       <div class="field"><label for="lib-name">Name</label><input id="lib-name" type="text" maxlength="120"></div>
       <p class="small" id="lib-status" style="margin:0"></p>
       <div class="row"><button class="btn primary" id="lib-save">Save to My scenarios</button><button class="btn" id="lib-saveas" hidden>Save as a new copy</button></div>
@@ -739,7 +788,7 @@ function fromData(d){
   return s;
 }
 function loadScenario(data, opts={}){
-  const s = fromData(data); if(typeof libCurrent!=='undefined') libCurrent = null;
+  const s = fromData(data); if(typeof libCurrent!=='undefined') libCurrent = null; if(typeof shortDoc!=='undefined') shortDoc = null;
   if(opts.undoable) checkpoint(); else { undoStack=[]; redoStack=[]; updateUndo(); }
   setReadOnly(!!data.ro);
   camMode = 'free'; syncCamUI();
@@ -2749,7 +2798,7 @@ $('#brief-notes').addEventListener('input', e => { if(!briefCk){ checkpoint(); b
   changed(); fitPlan(); syncBrief(); if(T) resetOrbit(); }));
 function openSheet(id){
   if(id==='brief') syncBrief();
-  if(id==='share') prepareShare();
+  if(id==='share'){ prepareShare(); renderShort(); }
   $('#'+id).hidden = false;
 }
 
@@ -2984,7 +3033,7 @@ function setShareMode(ro){
   document.querySelectorAll('#share-mode button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.ro==='1')===ro)));
   $('#btn-save-file').textContent = ro ? 'Save view-only file' : 'Save editable file';
   $('#share-mode-help').textContent = ro ? 'The team can play it, look in 3D, walk it and check sightlines, but every editing tool is hidden.' : 'Opens with every tool, so whoever gets it can change it and send it on. Use this for other instructors.';
-  if(!$('#share').hidden) prepareShare();
+  if(!$('#share').hidden){ prepareShare(); renderShort(); }
 }
 $('#share-mode').addEventListener('click', e => { const b = e.target.closest('[data-ro]'); if(b) setShareMode(b.dataset.ro==='1'); });
 $('#ro-leave').addEventListener('click', () => { loadScenario({v:3, t:'Untitled scenario', n:'', w:24, h:16, e:[], i:[], a:[]}); $('#share').hidden = true; setMode('plan'); });
@@ -3199,58 +3248,192 @@ $('#cam-list').addEventListener('input', e => { if(e.target.dataset.cf!=='t') re
   if(!k || !(v>=0)) return; if(!camCk){ checkpoint(); camCk = true; } k.t = snapT(v); changed(); });
 $('#cam-list').addEventListener('change', e => { if(e.target.dataset.cf==='t'){ S.cam.sort((a,b) => a.t-b.t); changed(); renderCamList(); } });
 
-/* ---------------- my scenarios (saved in this browser) ----------------
-   A named list kept in this browser's storage on this device. Each entry is the scenario's save data.
-   Export writes them all to one backup file; import adds a backup's scenarios to the list. */
+/* ---------------- accounts (Firebase) ----------------
+   Sign in with Google or email + password. Signed in, My scenarios lives in the account (Firestore) so it follows
+   you to any device, and Send or open can make a short link (#p=ID) that anyone can open without signing in.
+   The SDK loads only when needed, and only on the planner's website (the Claude page and offline copies can't
+   reach Google's servers). Each scenario is one document: {owner, title, data (JSON text), size, created, updated}.
+   The database rules let anyone read a document by its id, and only its owner list, change or delete it. */
+const FB_CONFIG = {apiKey:'AIzaSyDw97Kzv9PGfYnawkwp3Oz0d_2eyQynOcE', authDomain:'cqb-planner.firebaseapp.com', projectId:'cqb-planner',
+  storageBucket:'cqb-planner.firebasestorage.app', messagingSenderId:'501999573830', appId:'1:501999573830:web:beb1fda7e9e1f657416347'};
+const FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
+const CLOUD_OK = !window.claude && (location.protocol==='https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
+let fb = null, fbUser = null, fbLoading = null, cloudList = null, cloudBusy = false;
+function loadScript(src){ return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Couldn’t load ' + src)); document.head.appendChild(s); }); }
+function cloudInit(){
+  if(!CLOUD_OK) return Promise.reject(new Error('offsite'));
+  if(fbLoading) return fbLoading;
+  fbLoading = (async () => {
+    if(!window.firebase || !window.firebase.firestore){
+      if(!window.firebase) await loadScript(FB_SDK + 'firebase-app-compat.js');
+      await Promise.all([loadScript(FB_SDK + 'firebase-auth-compat.js'), loadScript(FB_SDK + 'firebase-firestore-compat.js')]);
+    }
+    if(!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
+    fb = {auth: firebase.auth(), db: firebase.firestore()};
+    await new Promise(res => { let first = true; fb.auth.onAuthStateChanged(u => {
+      const changedUser = (fbUser && fbUser.uid) !== (u && u.uid); fbUser = u;
+      try{ u ? localStorage.setItem('cqb-signed-in', '1') : localStorage.removeItem('cqb-signed-in'); }catch(e){}
+      if(changedUser){ cloudList = null; if(libCurrent && String(libCurrent).startsWith('c:')) libCurrent = null; }
+      renderAcct(); updateAcctBtn(); if(!$('#lib').hidden) refreshLib(); if(!$('#share').hidden) renderShort();
+      if(first){ first = false; res(); } }); });
+    try{ await fb.auth.getRedirectResult(); }catch(e){ acctErr(e); }
+    return fb;
+  })();
+  fbLoading.catch(() => { fbLoading = null; });
+  return fbLoading;
+}
+const cloudCol = () => fb.db.collection('scenarios');
+function newShortId(){ const a = 'abcdefghjkmnpqrstuvwxyz23456789', r = new Uint8Array(10); crypto.getRandomValues(r); return Array.from(r, x => a[x % a.length]).join(''); }
+const tsMs = t => t && typeof t.toMillis==='function' ? t.toMillis() : Date.now();
+async function cloudFetch(){
+  await cloudInit(); if(!fbUser) return (cloudList = []);
+  const snap = await cloudCol().where('owner', '==', fbUser.uid).get();
+  cloudList = snap.docs.map(d => { const v = d.data(); return {id:'c:'+d.id, doc:d.id, title:v.title || 'Untitled scenario', updated:tsMs(v.updated), size:v.size || (v.data||'').length, text:v.data || ''}; })
+    .sort((a,b) => b.updated - a.updated);
+  return cloudList;
+}
+// saves the scenario on screen to the account; updates the one it came from unless asNew. Returns the document id.
+async function cloudSave(asNew, name){
+  await cloudInit(); if(!fbUser) throw new Error('signed-out');
+  const title = (name || S.title || 'Untitled scenario').trim().slice(0,120), text = JSON.stringify(toData(READONLY)), now = firebase.firestore.FieldValue.serverTimestamp();
+  const cur = !asNew && libCurrent && String(libCurrent).startsWith('c:') ? String(libCurrent).slice(2) : null;
+  if(cur){ await cloudCol().doc(cur).update({title, data:text, size:text.length, updated:now}); libCurrent = 'c:'+cur; }
+  else { const id = newShortId(); await cloudCol().doc(id).set({owner:fbUser.uid, title, data:text, size:text.length, created:now, updated:now}); libCurrent = 'c:'+id; }
+  libSavedVer = ver; cloudList = null; return String(libCurrent).slice(2);
+}
+const ACCT_ERRS = {'auth/invalid-credential':'That email and password don’t match an account.', 'auth/wrong-password':'That password isn’t right.', 'auth/user-not-found':'No account uses that email yet. Tap Create account.',
+  'auth/invalid-email':'That email address doesn’t look right.', 'auth/email-already-in-use':'An account already uses that email. Tap Sign in instead.', 'auth/weak-password':'Pick a password with at least 6 characters.',
+  'auth/missing-password':'Type your password.', 'auth/too-many-requests':'Too many tries. Wait a few minutes and try again.', 'auth/network-request-failed':'No connection. Check your signal and try again.',
+  'auth/unauthorized-domain':'Sign-in isn’t switched on for this website yet (Firebase → Authentication → Settings → Authorized domains).',
+  'auth/operation-not-allowed':'That sign-in method isn’t switched on yet (Firebase → Authentication → Sign-in method).', 'permission-denied':'The database refused that. Check the Firestore rules.',
+  'auth/popup-blocked':'Your browser blocked the sign-in window. Allow pop-ups for this site and try again.'};
+function acctErr(e){ const code = e && e.code; if(code==='auth/popup-closed-by-user' || code==='auth/cancelled-popup-request') return;
+  const el = $('#acct-err'); el.textContent = ACCT_ERRS[code] || (e && e.message === 'offsite' ? 'Sign-in works on the planner’s website.' : 'Something went wrong' + (code ? ' (' + code + ')' : '') + '. Try again.'); el.hidden = false; }
+function updateAcctBtn(){ const b = $('#btn-acct'), on = !!fbUser;
+  b.classList.toggle('on', on); b.title = on ? 'Signed in · ' + (fbUser.email || fbUser.displayName || 'account') : 'Sign in'; b.setAttribute('aria-label', b.title);
+  $('#acct-initial').textContent = on ? String(fbUser.displayName || fbUser.email || '?').trim().charAt(0).toUpperCase() : ''; }
+function renderAcct(){
+  const off = !CLOUD_OK, inn = !!fbUser;
+  $('#acct-offsite').hidden = !off; $('#acct-out').hidden = off || inn; $('#acct-in').hidden = off || !inn;
+  $('#acct-h').textContent = inn ? 'Your account' : 'Sign in';
+  if(inn) $('#acct-who').textContent = fbUser.email || fbUser.displayName || 'your account';
+}
+function openAcct(){ pause(); $('#acct-err').hidden = true; renderAcct(); $('#acct').hidden = false;
+  if(CLOUD_OK && !fb){ $('#acct-out').classList.add('busy'); cloudInit().catch(acctErr).finally(() => $('#acct-out').classList.remove('busy')); } }
+async function acctDo(fn){ $('#acct-err').hidden = true; $('#acct-out').classList.add('busy');
+  try{ await cloudInit(); await fn(); }catch(e){ acctErr(e); } finally{ $('#acct-out').classList.remove('busy'); } }
+const acctEmail = () => ($('#acct-email').value || '').trim(), acctPw = () => $('#acct-pw').value || '';
+$('#btn-acct').addEventListener('click', openAcct);
+$('#acct-google').addEventListener('click', () => acctDo(async () => { const p = new firebase.auth.GoogleAuthProvider(); p.setCustomParameters({prompt:'select_account'});
+  try{ await fb.auth.signInWithPopup(p); }catch(e){ if(e && (e.code==='auth/popup-blocked' || e.code==='auth/operation-not-supported-in-this-environment')) await fb.auth.signInWithRedirect(p); else throw e; }
+  toast('Signed in'); }));
+$('#acct-signin').addEventListener('click', () => acctDo(async () => { await fb.auth.signInWithEmailAndPassword(acctEmail(), acctPw()); toast('Signed in'); }));
+$('#acct-create').addEventListener('click', () => acctDo(async () => { await fb.auth.createUserWithEmailAndPassword(acctEmail(), acctPw()); toast('Account created · you’re signed in'); }));
+$('#acct-reset').addEventListener('click', () => acctDo(async () => { if(!acctEmail()){ const e = new Error(); e.code = 'auth/invalid-email'; throw e; }
+  await fb.auth.sendPasswordResetEmail(acctEmail()); const el = $('#acct-err'); el.textContent = 'Check your email for a link to set a new password.'; el.hidden = false; }));
+$('#acct-pw').addEventListener('keydown', e => { if(e.key==='Enter') $('#acct-signin').click(); });
+$('#acct-signout').addEventListener('click', async () => { try{ await fb.auth.signOut(); toast('Signed out'); }catch(e){ toast('Couldn’t sign out · try again'); } });
+$('#acct-lib').addEventListener('click', () => { $('#acct').hidden = true; $('#btn-lib').click(); });
+
+/* ---------------- my scenarios ----------------
+   Signed in: kept in the account and listed from there. Signed out (or off the website): a named list kept in this
+   browser's storage. Scenarios saved on the device before signing in can be copied up to the account.
+   Export writes the device list to one backup file; import adds a backup's scenarios to it. */
 const LIB_KEY = 'cqb-library-v1';
 let libCurrent = null, libSavedVer = -1;
 function libRead(){ try{ const v = JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); return Array.isArray(v) ? v : []; }catch(e){ return []; } }
 function libWrite(list){ try{ localStorage.setItem(LIB_KEY, JSON.stringify(list)); return true; }catch(e){ toast('Couldn’t save · this browser’s storage is full or turned off'); return false; } }
 const libId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
-function libSave(asNew){
+const isCloudId = id => String(id||'').startsWith('c:');
+function libEntry(id){ return isCloudId(id) ? (cloudList || []).find(x => x.id===id) : libRead().find(x => x.id===id); }
+async function libSave(asNew){
   const name = ($('#lib-name').value || S.title || 'Untitled scenario').trim().slice(0,120);
   if(S.title !== name){ S.title = name; changed(); syncBrief(); }
+  if(fbUser){ if(cloudBusy) return; cloudBusy = true; libBusy(true);
+    try{ await cloudSave(asNew, name); toast('Saved to your account'); await refreshLib(); }
+    catch(e){ toast(e && e.code==='permission-denied' ? 'The database refused the save · check the Firestore rules' : 'Couldn’t save to your account · check your connection'); }
+    finally{ cloudBusy = false; libBusy(false); }
+    return; }
   const list = libRead(), data = toData(READONLY), now = Date.now();
-  let e = !asNew && libCurrent && list.find(x => x.id===libCurrent);
+  let e = !asNew && libCurrent && !isCloudId(libCurrent) && list.find(x => x.id===libCurrent);
   if(e){ e.title = name; e.updated = now; e.data = data; }
   else { e = {id:libId(), title:name, updated:now, data}; list.unshift(e); }
-  if(libWrite(list)){ libCurrent = e.id; libSavedVer = ver; toast(asNew || !e ? 'Saved to My scenarios' : 'Saved'); renderLib(); }
+  if(libWrite(list)){ libCurrent = e.id; libSavedVer = ver; toast('Saved to My scenarios'); renderLib(); }
 }
 function libOpen(id){
-  const e = libRead().find(x => x.id===id); if(!e) return;
-  try{ loadScenario(e.data, {undoable:true}); }catch(err){ toast('That saved scenario couldn’t be opened'); return; }
+  const e = libEntry(id); if(!e) return;
+  try{ loadScenario(isCloudId(id) ? JSON.parse(e.text) : e.data, {undoable:true}); }catch(err){ toast('That saved scenario couldn’t be opened'); return; }
   libCurrent = id; libSavedVer = ver; $('#lib').hidden = true; setMode('plan'); toast('Opened ' + e.title);
 }
+function libBusy(on){ $('#lib').classList.toggle('busy', on); }
+async function refreshLib(){
+  renderLib();
+  if(fbUser && cloudList===null){ libBusy(true); try{ await cloudFetch(); }catch(e){ cloudList = []; toast('Couldn’t load your scenarios · check your connection'); } libBusy(false); renderLib(); }
+}
+const libFmt = t => { try{ return new Date(t).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}); }catch(e){ return ''; } };
+function libRows(list, cloud){
+  return list.map(e => { const kb = Math.max(1, Math.round((cloud ? e.size : JSON.stringify(e.data).length)/1024));
+    const ro = cloud ? /"ro":1/.test(e.text) : e.data && e.data.ro;
+    return `<div class="lib-row ${e.id===libCurrent?'cur':''}" data-id="${e.id}">
+      <div class="lib-main"><b>${esc(e.title)}</b><span class="small">${ro ? 'View only · ' : ''}${libFmt(e.updated)} · ${kb} KB</span></div>
+      <button class="btn sm" data-lo="${e.id}">Open</button>${cloud ? `<button class="btn sm" data-ll="${e.id}">Link</button>` : ''}<button class="btn sm" data-lr="${e.id}">Rename</button><button class="btn sm danger" data-ld="${e.id}" aria-label="Delete ${esc(e.title)}">✕</button></div>`; }).join('');
+}
 function renderLib(){
-  const list = libRead(), cur = list.find(x => x.id===libCurrent), dirty = cur && libSavedVer !== ver;
+  const inn = !!fbUser, local = libRead(), cl = cloudList || [], cur = libEntry(libCurrent), dirty = cur && libSavedVer !== ver;
+  $('#lib-eyebrow').textContent = inn ? 'Saved to your account' : 'Saved on this device';
+  $('#lib-acct').innerHTML = !CLOUD_OK ? '' : inn ? `Signed in as <b>${esc(fbUser.email || fbUser.displayName || '')}</b>. These open on any device where you sign in.`
+    : `<button class="link" id="lib-signin">Sign in</button> to keep your scenarios online and open them on any device.`;
   $('#lib-name').value = S.title || '';
-  $('#lib-save').textContent = cur ? (dirty ? 'Save changes' : 'Saved') : 'Save to My scenarios';
+  $('#lib-save').textContent = cur ? (dirty ? 'Save changes' : 'Saved') : inn ? 'Save to my account' : 'Save to My scenarios';
   $('#lib-save').disabled = !!cur && !dirty;
   $('#lib-saveas').hidden = !cur;
-  $('#lib-status').textContent = cur ? (dirty ? `You have unsaved changes to “${cur.title}”.` : `This is “${cur.title}” from your list.`) : 'This scenario isn’t in your list yet.';
-  const fmt = t => { try{ return new Date(t).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}); }catch(e){ return ''; } };
-  $('#lib-list').innerHTML = list.length ? list.map(e => `<div class="lib-row ${e.id===libCurrent?'cur':''}" data-id="${e.id}">
-      <div class="lib-main"><b>${esc(e.title)}</b><span class="small">${e.data && e.data.ro ? 'View only · ' : ''}${fmt(e.updated)} · ${Math.max(1, Math.round(JSON.stringify(e.data).length/1024))} KB</span></div>
-      <button class="btn sm" data-lo="${e.id}">Open</button><button class="btn sm" data-lr="${e.id}">Rename</button><button class="btn sm danger" data-ld="${e.id}" aria-label="Delete ${esc(e.title)}">✕</button></div>`).join('')
-    : '<p class="small" style="margin:0">Nothing saved yet. Name this scenario above and save it.</p>';
+  $('#lib-status').textContent = cur ? (dirty ? `You have unsaved changes to “${cur.title}”.` : `This is “${cur.title}” from your list.`) : 'This scenario isn’t saved yet.';
+  let h = '';
+  if(inn){ h += cloudList===null ? '<p class="small" style="margin:0">Loading your scenarios…</p>' : cl.length ? libRows(cl, true) : '<p class="small" style="margin:0">Nothing in your account yet. Name this scenario above and save it.</p>';
+    if(local.length) h += `<div class="lib-local"><h3>On this device (${local.length})</h3><p class="small">Saved here before you signed in. Copy them to your account to open them anywhere.</p>
+      <div class="row"><button class="btn" id="lib-upload">Copy ${local.length===1?'it':'all '+local.length} to my account</button></div>${libRows(local, false)}</div>`; }
+  else h = local.length ? libRows(local, false) : '<p class="small" style="margin:0">Nothing saved yet. Name this scenario above and save it.</p>';
+  $('#lib-list').innerHTML = h;
 }
-$('#btn-lib').addEventListener('click', () => { pause(); renderLib(); $('#lib').hidden = false; });
+$('#btn-lib').addEventListener('click', () => { pause(); $('#lib').hidden = false; refreshLib(); });
 $('#lib-save').addEventListener('click', () => libSave(false));
 $('#lib-saveas').addEventListener('click', () => libSave(true));
-$('#lib-list').addEventListener('click', e => {
-  const o = e.target.closest('[data-lo]'), r = e.target.closest('[data-lr]'), d = e.target.closest('[data-ld]');
+$('#lib-acct').addEventListener('click', e => { if(e.target.closest('#lib-signin')){ $('#lib').hidden = true; openAcct(); } });
+function shortLink(doc, ro){ return SITE_URL + '#p=' + doc + (ro ? '' : '&e=1'); }
+function copyText(txt, okMsg, ta){ const fallback = () => { if(ta){ ta.focus(); ta.select(); } toast('Selected · copy it from your keyboard menu'); };
+  try{ navigator.clipboard.writeText(txt).then(() => toast(okMsg), fallback); }catch(e){ fallback(); } }
+$('#lib-list').addEventListener('click', async e => {
+  const o = e.target.closest('[data-lo]'), r = e.target.closest('[data-lr]'), d = e.target.closest('[data-ld]'), l = e.target.closest('[data-ll]'), up = e.target.closest('#lib-upload');
   if(o){ const go = () => libOpen(o.dataset.lo);
     if(libSavedVer !== ver && !(libCurrent===null && undoStack.length===0)) confirmAsk('Open it? Changes you haven’t saved stay in Undo.', 'Open', go); else go(); }
-  if(r){ const list = libRead(), en = list.find(x => x.id===r.dataset.lr); if(!en) return;
-    const row = r.closest('.lib-row'); row.querySelector('.lib-main').innerHTML = `<input type="text" id="lib-ren-${en.id}" value="${esc(en.title)}" maxlength="120" aria-label="New name">`;
-    const inp = row.querySelector('input'); inp.focus(); inp.select();
-    const done = () => { const v = inp.value.trim(); if(v){ en.title = v; if(en.data) en.data.t = v; libWrite(list); if(en.id===libCurrent){ S.title = v; changed(); syncBrief(); libSavedVer = ver; } } renderLib(); };
-    inp.addEventListener('keydown', ev => { if(ev.key==='Enter') done(); if(ev.key==='Escape') renderLib(); }); inp.addEventListener('blur', done); }
-  if(d){ const list = libRead(), en = list.find(x => x.id===d.dataset.ld); if(!en) return;
-    confirmAsk(`Delete “${en.title}” from My scenarios?`, 'Delete', () => { libWrite(libRead().filter(x => x.id!==en.id)); if(libCurrent===en.id) libCurrent = null; renderLib(); $('#lib').hidden = false; }); }
+  if(l){ const en = libEntry(l.dataset.ll); if(en) copyText(shortLink(en.doc, /"ro":1/.test(en.text)), 'Short link copied · anyone with it can watch'); }
+  if(r){ const id = r.dataset.lr, en = libEntry(id); if(!en) return;
+    const row = r.closest('.lib-row'); row.querySelector('.lib-main').innerHTML = `<input type="text" value="${esc(en.title)}" maxlength="120" aria-label="New name">`;
+    const inp = row.querySelector('input'); inp.focus(); inp.select(); let done1 = false;
+    const done = async () => { if(done1) return; done1 = true; const v = inp.value.trim();
+      if(v && v !== en.title){
+        if(isCloudId(id)){ try{ const dd = JSON.parse(en.text); dd.t = v; const text = JSON.stringify(dd);
+            await cloudCol().doc(en.doc).update({title:v, data:text, updated:firebase.firestore.FieldValue.serverTimestamp()}); en.title = v; en.text = text; }
+          catch(err){ toast('Couldn’t rename · check your connection'); } }
+        else { const list = libRead(), le = list.find(x => x.id===id); if(le){ le.title = v; if(le.data) le.data.t = v; libWrite(list); } }
+        if(id===libCurrent){ S.title = v; changed(); syncBrief(); libSavedVer = ver; } }
+      renderLib(); };
+    inp.addEventListener('keydown', ev => { if(ev.key==='Enter') done(); if(ev.key==='Escape'){ done1 = true; renderLib(); } }); inp.addEventListener('blur', done); }
+  if(d){ const id = d.dataset.ld, en = libEntry(id); if(!en) return;
+    confirmAsk(`Delete “${en.title}”?${isCloudId(id) ? ' Short links to it will stop working.' : ''}`, 'Delete', async () => {
+      if(isCloudId(id)){ try{ await cloudCol().doc(en.doc).delete(); cloudList = (cloudList||[]).filter(x => x.id!==id); }catch(err){ toast('Couldn’t delete · check your connection'); } }
+      else libWrite(libRead().filter(x => x.id!==id));
+      if(libCurrent===id) libCurrent = null; renderLib(); $('#lib').hidden = false; }); }
+  if(up){ const local = libRead(); if(!local.length || cloudBusy) return; cloudBusy = true; libBusy(true); let n = 0;
+    try{ for(const x of local){ const text = JSON.stringify(x.data), now = firebase.firestore.FieldValue.serverTimestamp();
+        await cloudCol().doc(newShortId()).set({owner:fbUser.uid, title:String(x.title||'Untitled scenario').slice(0,120), data:text, size:text.length, created:now, updated:now}); n++; }
+      toast(`Copied ${n} to your account · the copies on this device are still here`); }
+    catch(err){ toast(n ? `Copied ${n} of ${local.length} · try again for the rest` : 'Couldn’t copy · check your connection'); }
+    cloudBusy = false; libBusy(false); cloudList = null; refreshLib(); }
 });
 $('#lib-export').addEventListener('click', () => {
-  const list = libRead(); if(!list.length){ toast('Nothing to export yet'); return; }
+  const list = libRead().concat((cloudList || []).map(x => { try{ return {id:x.id.slice(2), title:x.title, updated:x.updated, data:JSON.parse(x.text)}; }catch(e){ return null; } }).filter(Boolean));
+  if(!list.length){ toast('Nothing to export yet'); return; }
   saveBlob(new Blob([JSON.stringify({cqbLibrary:1, saved:Date.now(), scenarios:list}, null, 1)], {type:'application/json'}), 'cqb-scenarios-backup.json');
 });
 $('#lib-import').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if(!f) return;
@@ -3258,9 +3441,42 @@ $('#lib-import').addEventListener('change', e => { const f = e.target.files && e
       const j = JSON.parse(String(rd.result)), inc = Array.isArray(j) ? j : j.scenarios; if(!Array.isArray(inc)) throw 0;
       const list = libRead(), have = new Set(list.map(x => x.id)); let n = 0;
       for(const x of inc){ if(!x || !x.data) continue; fromData(x.data); const en = {id: have.has(x.id) ? libId() : (x.id || libId()), title:String(x.title||x.data.t||'Imported scenario').slice(0,120), updated:+x.updated||Date.now(), data:x.data}; list.push(en); n++; }
-      if(libWrite(list)){ toast(`Added ${n} scenario${n===1?'':'s'}`); renderLib(); }
+      if(libWrite(list)){ toast(`Added ${n} scenario${n===1?'':'s'} to this device`); renderLib(); }
     }catch(err){ toast('That isn’t a scenarios backup file'); } };
   rd.readAsText(f); e.target.value = ''; });
+
+/* ---------------- short links in Send or open ---------------- */
+let shortDoc = null;
+function renderShort(){
+  const off = !CLOUD_OK, inn = !!fbUser;
+  $('#short-off').hidden = !off; $('#short-out').hidden = off || inn; $('#short-in').hidden = off || !inn;
+  const have = shortDoc && libCurrent==='c:'+shortDoc;
+  $('#short-link').hidden = !have; $('#short-copy').hidden = !have;
+  if(have) $('#short-link').value = shortLink(shortDoc, shareRO);
+  const cur = isCloudId(libCurrent), dirty = cur && libSavedVer !== ver;
+  $('#short-make').textContent = !cur ? 'Save to my account and get a link' : dirty ? 'Save changes and get the link' : 'Get the link';
+  $('#short-help').textContent = cur ? 'The link always shows the latest version you saved. Save changes and everyone with the link sees them.' : 'Saves this scenario to your account, then gives you a short link anyone can open without signing in.';
+}
+$('#short-make').addEventListener('click', async () => { if(cloudBusy) return; cloudBusy = true; $('#short-make').disabled = true;
+  try{ shortDoc = (isCloudId(libCurrent) && libSavedVer === ver) ? String(libCurrent).slice(2) : await cloudSave(false, S.title); renderShort();
+    copyText($('#short-link').value, 'Short link copied · paste it into a text or Discord', $('#short-link')); }
+  catch(e){ toast(e && e.code==='permission-denied' ? 'The database refused the save · check the Firestore rules' : 'Couldn’t save to your account · check your connection'); }
+  finally{ cloudBusy = false; $('#short-make').disabled = false; } });
+$('#short-copy').addEventListener('click', () => copyText($('#short-link').value, 'Short link copied · paste it into a text or Discord', $('#short-link')));
+$('#short-signin').addEventListener('click', () => { $('#share').hidden = true; openAcct(); });
+async function openShortLink(doc, edit){
+  try{ await cloudInit();
+    const snap = await cloudCol().doc(doc).get();
+    if(!snap.exists){ toast('That scenario was deleted or the link is wrong'); return; }
+    const v = snap.data(), d = JSON.parse(v.data), mine = fbUser && v.owner === fbUser.uid;
+    if(!mine && !edit) d.ro = 1;
+    if(!mine && edit) d.ro = 0;
+    loadScenario(d);
+    if(mine){ libCurrent = 'c:'+doc; libSavedVer = ver; toast('Your scenario · changes save to the same link'); }
+    if(!mine && edit){ try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){} }
+    openSheet('brief');
+  }catch(e){ toast(e && e.message==='offsite' ? 'Short links open on the planner’s website' : 'Couldn’t open that link · check your connection'); }
+}
 
 /* ---------------- guided tour ----------------
    Spotlights one part of the screen at a time with a short explanation. Steps whose target isn't on screen
@@ -3278,7 +3494,8 @@ const TOUR = [
   {sel:'#btn-routes', t:'See what they see', b:'<b>Routes</b> hides the lines for a clean demo. <b>View cones</b> show where everyone is looking. <b>Threat view</b> shades what the hostiles can see. Tap a person and choose <b>Show what they see</b> to shade his dead space.'},
   {sel:'.modes', t:'3D and Walk', b:'<b>3D</b> shows the run from above; try <b>Drone</b>, a camera that follows the team. <b>Walk</b> puts you at eye level, or rides along with one shooter.'},
   {sel:'#btn-share', t:'Send it to the team', b:'Copy a <b>share link</b> to text or post, choose <b>view only</b> or <b>editable</b>, save a file, or <b>record a video</b> anyone can watch.'},
-  {sel:'#btn-lib', t:'My scenarios', b:'Save scenarios on this device and reopen them later. Export a backup now and then.'},
+  {sel:'#btn-acct', t:'Sign in', b:'Sign in with Google or email to keep your scenarios online. Open them on any phone or computer, and send <b>short links</b> instead of long codes.'},
+  {sel:'#btn-lib', t:'My scenarios', b:'Save scenarios and reopen them later. Signed in, they live in your account; signed out, they stay on this device.'},
   {sel:'#btn-help', t:'That’s the basics', b:'Open the <b>Hall boss</b> or <b>T-intersection</b> drill under <b>Send or open → Start over</b> to see a full plan, and replay this tour from here any time.'}
 ];
 let tourI = -1;
@@ -3336,10 +3553,14 @@ $('#btn-default').addEventListener('click', () => confirmAsk('Replace this layou
   setTool('select'); updateUndo(); resizePlan(); changed(); syncBrief();
   if(EMBEDDED) openSheet('brief');
   let toured = false; try{ toured = !!localStorage.getItem('cqb-tour-done'); }catch(e){}
-  if(!toured && !EMBEDDED && !/#s=/.test(location.hash||'')) setTimeout(tourStart, 600);
+  if(!toured && !EMBEDDED && !/#[sp]=/.test(location.hash||'')) setTimeout(tourStart, 600);
   const hs = (location.hash || '').match(/#s=(CQB[01]\.[A-Za-z0-9_-]+)/);
   if(hs) decodeCode(hs[1]).then(d => { loadScenario(d); openSheet('brief'); try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){} })
     .catch(() => toast('That scenario link is damaged · ask for it again'));
+  const hp = (location.hash || '').match(/#p=([a-z0-9]{6,24})(&e=1)?/);
+  if(hp) openShortLink(hp[1], !!hp[2]);
+  else { let was = false; try{ was = !!localStorage.getItem('cqb-signed-in'); }catch(e){} if(was && CLOUD_OK) cloudInit().catch(() => {}); }
+  renderAcct(); updateAcctBtn();
   if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => drawPlan());
   if(window.claude && typeof window.claude.use==='function'){
     window.claude.use('downloads').then(api => { downloadsApi = api; }).catch(() => {});
