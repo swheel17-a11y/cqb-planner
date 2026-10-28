@@ -499,7 +499,8 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
       <p class="small" style="margin:0">The stack flows in alternating sides: each man goes the opposite way to the man in front of him. #1 and #2 go deep to their corners, the rest stop a step or two inside. Everyone digs his own corner first.</p>
       <div class="block" style="border-top:0;padding-top:0"><h3>Who goes</h3><div id="zip-men" class="zip-men"></div></div>
       <div class="block"><h3>First man</h3><div class="seg"><button data-zfirst="hook">Button hook (his side)</button><button data-zfirst="cross">Crisscross (far side)</button></div></div>
-      <div class="block"><h3>Tempo</h3><div class="seg"><button data-ztempo="d">Deliberate</button><button data-ztempo="s">Steady</button><button data-ztempo="x">Dynamic</button></div><p class="small" id="zip-tempo-help" style="margin:0"></p></div>
+      <div class="block"><h3>Speed</h3><div class="seg"><button data-ztempo="d">Deliberate</button><button data-ztempo="s">Steady</button><button data-ztempo="x">Dynamic</button></div><h3 style="margin-top:6px">Time between men at the door</h3><div class="seg"><button data-zgap="0.25">¼ s</button><button data-zgap="0.35">⅓ s</button><button data-zgap="0.5">½ s</button></div><p class="small" id="zip-tempo-help" style="margin:0"></p></div>
+      <div class="block"><label class="zip-chk"><input type="checkbox" id="zip-tighten"> Close the stack up first (about 1.4 ft apart), then #1 goes. Needed for a quarter-second rhythm if they’re standing spread out.</label></div>
       <div class="block"><label class="zip-chk"><input type="checkbox" id="zip-sectors"> After clearing his corner, each man pauses, then turns to work his sector</label></div>
       <p class="small" style="margin:0">This replaces what these men do past the door. Undo puts it back. Hug distance follows Tight / Normal / Wide.</p>
       <div class="row"><button class="btn primary" id="zip-build">Build the entry</button></div>
@@ -3962,9 +3963,10 @@ function entryMove(it, from, kind){
 const buttonHook = (it, from) => entryMove(it, from, 'hook');
 
 /* ---- zipper: the whole stack through one doorway ---- */
-const ZIP_TEMPO = {d:['Deliberate', 4, 0.35], s:['Steady', 5.5, 0.1], x:['Dynamic', 7, 0]};   // name, ft/s, seconds between the man ahead clearing the threshold and the next man crossing it
-let zip = {first:'hook', tempo:'s', sectors:true, ids:[], from:null};
-try{ const v = JSON.parse(localStorage.getItem('cqb-zip') || 'null'); if(v){ zip.first = v.first==='cross' ? 'cross' : 'hook'; zip.tempo = ZIP_TEMPO[v.tempo] ? v.tempo : 's'; zip.sectors = v.sectors !== false; } }catch(e){}
+const ZIP_TEMPO = {d:['Deliberate', 4], s:['Steady', 5.5], x:['Dynamic', 7]};   // name, walking speed ft/s
+const ZIP_GAPS = [0.25, 0.35, 0.5];   // seconds between one man crossing the door line and the next
+let zip = {first:'hook', tempo:'s', gap:0.25, sectors:true, tighten:true, ids:[], from:null};
+try{ const v = JSON.parse(localStorage.getItem('cqb-zip') || 'null'); if(v){ zip.first = v.first==='cross' ? 'cross' : 'hook'; zip.tempo = ZIP_TEMPO[v.tempo] ? v.tempo : 's'; zip.sectors = v.sectors !== false; zip.tighten = v.tighten !== false; if(ZIP_GAPS.includes(v.gap)) zip.gap = v.gap; } }catch(e){}
 const tagNum = q => { const n = parseInt(q.l, 10); return isNaN(n) ? 99 : n; };
 // the last waypoint he reaches before the doorway (-1 = his start), on the given side of the door line
 function outsideIndex(q, o, side){
@@ -3998,8 +4000,9 @@ function renderZipper(){
     return `<label class="zip-man"><input type="checkbox" data-zid="${m.q.id}" ${on?'checked':''} ${m.q===it?'disabled':''}><b>${esc(tagOf(m.q))}</b><span class="small">${pl ? `${pl.kind==='hook'?'Button hook':'Crisscross'} · goes ${pl.room===c.st.lr.left?'left':'right'} · ${k<2?'deep to his corner':'stops just inside'}` : 'stays out'}</span></label>`; }).join('');
   document.querySelectorAll('#zipper [data-zfirst]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.zfirst===zip.first)));
   document.querySelectorAll('#zipper [data-ztempo]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ztempo===zip.tempo)));
-  $('#zip-sectors').checked = zip.sectors;
-  $('#zip-tempo-help').textContent = `${ZIP_TEMPO[zip.tempo][1]} ft/s. Each man crosses the threshold ${ZIP_TEMPO[zip.tempo][2] ? 'about ' + ZIP_TEMPO[zip.tempo][2] + ' s after' : 'the moment'} the man ahead clears it, so nobody is in the room alone. If that would put two men within 2 ft, the second goes a touch later.`;
+  $('#zip-sectors').checked = zip.sectors; $('#zip-tighten').checked = zip.tighten;
+  document.querySelectorAll('#zipper [data-zgap]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.zgap===zip.gap)));
+  $('#zip-tempo-help').textContent = `Moving at ${ZIP_TEMPO[zip.tempo][1]} ft/s, one man through the door every ${zip.gap} s. If two would touch, the second goes a hair later.`;
 }
 // room side for each man in order (alternating), and whether that makes his move a hook or a cross
 function zipPlan(st, men){
@@ -4018,6 +4021,28 @@ function buildZipper(){
   const men = c.men.filter(m => zip.ids.includes(m.q.id)); if(!men.length) return;
   const plan = zipPlan(c.st, men), o = c.st.o, side = c.st.side, F = doorFrame(o, side), tempo = ZIP_TEMPO[zip.tempo], r = BH_HUG[bhHug][1]/FT;
   checkpoint();
+  // close the stack up: each man steps in to about 1.4 ft behind the nearest man ahead of him on his side of the door,
+  // so the team can go through one every quarter-second. #1 goes once the last man is in place.
+  const STACK = 1.35/FT, spotOf = m => m.i >= 0 ? m.q.path[m.i] : {x:m.q.x, y:m.q.y}, latOf = pt => ((o.h ? pt.x : pt.y) < F.mid ? -1 : 1);
+  const tight = []; let lastClosed = null;
+  plan.forEach((pl, k) => {
+    const q = pl.m.q; if(q.path) q.path = q.path.slice(0, pl.m.i + 1);
+    const cur = spotOf(pl.m); tight[k] = {x:cur.x, y:cur.y};
+    if(!zip.tighten || k===0) return;
+    let ahead = -1, bd = 1e9; for(let j=0;j<k;j++){ if(latOf(tight[j]) !== latOf(cur)) continue; const d = Math.hypot(tight[j].x-cur.x, tight[j].y-cur.y); if(d < bd){ bd = d; ahead = j; } }
+    if(ahead < 0) return;
+    // he belongs behind the man ahead, on the far side from the door: if he's standing in front of him, he moves back in line
+    const A = tight[ahead], dc = F.P(F.mid, o.line), dA = Math.hypot(A.x-dc.x, A.y-dc.y), dCur = Math.hypot(cur.x-dc.x, cur.y-dc.y);
+    const behind = dCur > dA + STACK*0.6;
+    if(behind && bd <= STACK + 0.08) return;
+    const ux = behind ? (cur.x - A.x)/bd : (A.x - dc.x)/(dA||1), uy = behind ? (cur.y - A.y)/bd : (A.y - dc.y)/(dA||1);
+    const spot = {x:r2(A.x + ux*STACK), y:r2(A.y + uy*STACK)};
+    if(!q.path) q.path = [];
+    q.path.splice(pl.m.i + 1, 0, {x:spot.x, y:spot.y, sp:3, w:0, go:'', g:null});
+    pl.m.i += 1; tight[k] = spot; lastClosed = {q, leg:pl.m.i};
+  });
+  if(lastClosed){ const m0 = plan[0].m, own0 = m0.i >= 0 ? m0.q.path[m0.i] : m0.q;
+    own0.acts = (own0.acts || []).filter(a => !(a.k==='wloc' && a.zipStack)); own0.acts.push({k:'wloc', who:lastClosed.q.id, seg:lastClosed.leg, f:1, d:0.2, set:1, zipStack:1}); }
   let prev = null;
   plan.forEach((pl, k) => {
     const q = pl.m.q, from = pl.m.i;
@@ -4044,28 +4069,26 @@ function buildZipper(){
       lastW.acts = (lastW.acts || []).filter(a => !(a.k==='look' && a.zip)); lastW.acts.push({k:'wait', d:0.5}, {k:'look', x:r2(target.x), y:r2(target.y), d:0, sw:0, zip:1}); }
     prev = {q, from, thr:ep.thr, n:ep.pts.length};
   });
-  // timing: each man crosses the threshold the moment the man ahead of him clears it (plus the tempo's gap).
-  // "Clears" = he's inside and at least 1.4 ft off the doorway. The next man steps off early enough to get there right then.
+  // timing: one man across the door line every zip.gap seconds. Each man steps off early enough to cross right then.
   changed();
-  const order = plan.map(pl => pl.m.q), CLEAR = 2.0/FT, vOf = pt => o.h ? pt.y : pt.x;
-  const offDoor = pt => o.h ? distSeg(pt.x, pt.y, o.a0, o.line, o.a1, o.line) : distSeg(pt.x, pt.y, o.line, o.a0, o.line, o.a1);
+  const order = plan.map(pl => pl.m.q), CLEAR = 1.2/FT, vOf = pt => o.h ? pt.y : pt.x;
   const firstMove = q => { const m = sched().map.get(q.id); return m ? m.ph.find(x => x.k==='m' && x.t1 > 0) : null; };
-  const scan = (q, test) => { const m = sched().map.get(q.id); if(!m) return null; for(let t = 0; t <= m.end + 0.05; t += 1/60){ const ps = poseAt(q, t); if(test(ps)) return t; } return null; };
+  const scan = (q, test) => { const m = sched().map.get(q.id); if(!m) return null; for(let t = 0; t <= m.end + 0.05; t += 1/120){ const ps = poseAt(q, t); if(test(ps)) return t; } return null; };
+  const crosses = ps => (vOf(ps) - o.line)*side <= 0;
   for(let k=1;k<order.length;k++){
     const q = order[k], pq = order[k-1], from = plan[k].m.i, owner = from >= 0 ? q.path[from] : q;
     owner.acts = (owner.acts || []).filter(a => !(a.k==='wloc' && a.zip)); changed();
-    // when the man ahead clears the threshold, as a spot on his route
-    const tc = scan(pq, ps => (vOf(ps) - o.line)*side < -0.05 && offDoor(ps) >= 1.4/FT);
-    const mp = sched().map.get(pq.id);
+    // the spot where the man ahead crosses the door line
+    const tp = scan(pq, crosses), mp = sched().map.get(pq.id);
     let seg, f;
-    if(tc!=null){ const ph = mp.ph.find(x => x.k==='m' && tc >= x.t0 - 1e-6 && tc <= x.t1 + 1e-6); if(ph){ seg = ph.leg; f = r2(legFrac(ph, tc).s); } }
+    if(tp!=null){ const ph = mp.ph.find(x => x.k==='m' && tp >= x.t0 - 1e-6 && tp <= x.t1 + 1e-6); if(ph){ seg = ph.leg; f = r2(legFrac(ph, tp).s); } }
     if(seg==null){ const last = (pq.path||[]).length - 1; seg = last; f = 1; }
-    // how long he takes from stepping off to crossing the door line, on his own
-    const mv = (sched().map.get(q.id)||{ph:[]}).ph.find(x => x.k==='m' && x.leg===from + 1) || firstMove(q), tx = scan(q, ps => (vOf(ps) - o.line)*side <= 0);
+    // how long he takes from stepping off to crossing the door line himself
+    const mv = (sched().map.get(q.id)||{ph:[]}).ph.find(x => x.k==='m' && x.leg===from + 1) || firstMove(q), tx = scan(q, crosses);
     const lead = mv && tx!=null ? Math.max(0, tx - mv.t0) : 0;
-    const a = {k:'wloc', who:pq.id, seg, f, d:r2(tempo[2] - lead), set:1, zip:1};
+    const a = {k:'wloc', who:pq.id, seg, f, d:r2(zip.gap - lead), set:1, zip:1};
     owner.acts.push(a); changed();
-    // never closer than 2 ft to anyone ahead of him: if he would be, he goes a tenth of a second later until he isn't
+    // bodies never overlap: if he would come within 1.2 ft (centre to centre) of anyone ahead of him, he goes a little later until he doesn't
     for(let tries=0; tries<40; tries++){
       const mine = sched().map.get(q.id); if(!mine || mine.stuck) break;
       // only from when he leaves his spot in the stack, and only at the doorway or inside: a tight stack outside is normal
@@ -4074,8 +4097,8 @@ function buildZipper(){
       for(let t=t0; t<=mine.end + 0.3 && !tooClose; t+=1/30){ const me = poseAt(q, t); if(!atDoor(me)) continue;
         for(let j=0;j<k;j++){ const o2 = poseAt(order[j], t); if(atDoor(o2) && Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
       if(!tooClose) break;
-      a.d = r2(a.d + 0.1); changed(); } }
-  try{ localStorage.setItem('cqb-zip', JSON.stringify({first:zip.first, tempo:zip.tempo, sectors:zip.sectors})); }catch(e){}
+      a.d = r2(a.d + 0.05); changed(); } }
+  try{ localStorage.setItem('cqb-zip', JSON.stringify({first:zip.first, tempo:zip.tempo, gap:zip.gap, sectors:zip.sectors, tighten:zip.tighten})); }catch(e){}
   $('#zipper').hidden = true; sel = {type:'item', id:it.id}; changed(); renderInspector(); setTime(0);
   toast(`Zipper built for ${men.length} men · press play. Undo puts their old moves back`);
 }
@@ -4083,9 +4106,11 @@ function buildZipper(){
 $('#zipper').addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return;
   if(b.dataset.zfirst){ zip.first = b.dataset.zfirst; renderZipper(); }
   if(b.dataset.ztempo){ zip.tempo = b.dataset.ztempo; renderZipper(); }
+  if(b.dataset.zgap){ zip.gap = +b.dataset.zgap; renderZipper(); }
   if(b.id==='zip-build') buildZipper(); });
 $('#zipper').addEventListener('change', e => { const c = e.target.closest('[data-zid]'); if(c){ const id = c.dataset.zid; zip.ids = c.checked ? [...new Set(zip.ids.concat(id))] : zip.ids.filter(x => x!==id); renderZipper(); }
-  if(e.target.id==='zip-sectors'){ zip.sectors = e.target.checked; } });
+  if(e.target.id==='zip-sectors'){ zip.sectors = e.target.checked; }
+  if(e.target.id==='zip-tighten'){ zip.tighten = e.target.checked; } });
 /* ---------------- movable panels ----------------
    The selection panel and the object picker can be dragged anywhere on the plan by their grip (the bar along the top)
    or, with a mouse, by any empty part of the panel. The spot is remembered on this device. Double-click the grip to
