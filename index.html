@@ -3849,10 +3849,30 @@ function openingSpan(key){
   while(open(a0-1)) a0--; while(open(a1)) a1++;
   return {h, line, a0, a1};
 }
+// every doorway on the plan: runs of door/opening pieces, and gaps left in a wall (up to 12 ft wide) with wall on both sides
+function doorways(){
+  const out = [], wallAt = (h, line, u) => isWall(S.edges.get(h ? `h,${u},${line}` : `v,${line},${u}`)),
+    openAt = (h, line, u) => { const e = S.edges.get(h ? `h,${u},${line}` : `v,${line},${u}`); return !!e && (e.t==='d' || e.t==='o'); };
+  for(const h of [true, false]){
+    const lines = h ? S.rows : S.cols, len = h ? S.cols : S.rows;
+    for(let line=0; line<=lines; line++){
+      let u = 0;
+      while(u < len){
+        if(wallAt(h, line, u)){ u++; continue; }
+        let v = u, hasOpen = false; while(v < len && !wallAt(h, line, v)){ if(openAt(h, line, v)) hasOpen = true; v++; }
+        const boxed = u > 0 && v < len && wallAt(h, line, u-1) && wallAt(h, line, v);
+        if(hasOpen || (boxed && v - u <= 4)){
+          // trim empty ends off a door/opening run that isn't boxed in by walls
+          let a0 = u, a1 = v; if(!boxed){ while(a0 < a1 && !openAt(h, line, a0)) a0++; while(a1 > a0 && !openAt(h, line, a1-1)) a1--; }
+          let door = null; for(let w=a0; w<a1; w++){ const k = h ? `h,${w},${line}` : `v,${line},${w}`, e = S.edges.get(k); if(e && e.t==='d'){ door = k; break; } }
+          out.push({h, line, a0, a1, door}); }
+        u = v; } } }
+  return out;
+}
 function nearestDoorway(px, py, maxD){
   let best = null;
-  for(const [k, e] of S.edges){ if(e.t!=='d' && e.t!=='o') continue; const [d, x, y] = parseKey(k), [x1, y1, x2, y2] = edgePts(d, x, y), dd = distSeg(px, py, x1, y1, x2, y2);
-    if(dd <= maxD && (!best || dd < best.d)) best = {k, d:dd}; }
+  for(const o of doorways()){ const d = o.h ? distSeg(px, py, o.a0, o.line, o.a1, o.line) : distSeg(px, py, o.line, o.a0, o.line, o.a1);
+    if(d <= maxD && (!best || d < best.d)) best = {o, d}; }
   return best;
 }
 // from: the waypoint index to hook from (-1 = where he starts). The hook goes in right after it.
@@ -3862,7 +3882,7 @@ function buttonHook(it, from){
   const sp = (from >= 0 && path[from].sp) || 5;
   const dw = nearestDoorway(last.x, last.y, 3.5);
   if(!dw){ toast(from >= 0 ? 'This waypoint is too far from a doorway · put it within about 10 ft of the door, on the side he’s coming from' : 'He’s too far from a doorway · tap the waypoint next to the door, then Button hook'); return false; }
-  const o = openingSpan(dw.k), mu = o.h ? last.x : last.y, mv = o.h ? last.y : last.x;
+  const o = dw.o, mu = o.h ? last.x : last.y, mv = o.h ? last.y : last.x;
   // which side he comes from: where he's standing, or where he came from if he's right on the doorway line
   let side = Math.abs(mv - o.line) > 0.12 ? Math.sign(mv - o.line) : 0;
   if(!side && before){ const bv = o.h ? before.y : before.x; side = Math.sign(bv - o.line); }
@@ -3891,7 +3911,7 @@ function buttonHook(it, from){
   for(const a of routeAnchors(it)) if(a.seg >= from + 1) a.seg += k;   // notes and "move when he reaches" pins further along stay on their legs
   it.path.splice(from + 1, 0, ...pts.map(q => ({x:r2(q.x), y:r2(q.y), sp, w:0, go:'', g:null, lx:r2(q.look.x), ly:r2(q.look.y)})));
   sel = {type:'wp', id:it.id, i:from + k}; changed(); renderInspector();
-  const e = S.edges.get(dw.k);
+  const e = o.door && S.edges.get(o.door);
   toast(later > 0 ? `Button hook added after this waypoint · ${later===1 ? 'his next waypoint still follows it, so delete it if he no longer needs it' : `his ${later} later waypoints still follow it, so delete any he no longer needs`}`
     : e && e.t==='d' && !(e.a===-1 || e.a > 60) ? 'Button hook added · the door is closed, so give someone an Open door before he goes' : 'Button hook added · he digs his corner. Add a look or sweep at the last point once it’s clear');
   return true;
