@@ -1,22 +1,139 @@
 rules_version = '2';
-// CQB planner: each scenario is one document in "scenarios".
-// Anyone with a link (the document id) can open it. Only the signed-in owner can list, change or delete theirs.
+// CQB planner database rules.
+//  scenarios/{id}         one saved drill. Anyone holding its id (a short link) can open it; only the owner lists, changes or deletes it.
+//  users/{uid}            profile: name, email, approved, admin. Admins see the list and approve accounts.
+//  users/{uid}/inbox/{id} drills other people shared with this user.
+//  emails/{email}         exact-email lookup used by "share with" (only for verified emails).
+//  hub/{id}               a drill posted to the hub: tier 'public' (any account) or 'approved' (approved accounts only).
+//  groups/{gid}           a group: owner, leaders, members, banned, names, code. Owner and leaders can remove people.
+//  groups/{gid}/items/{id} drills shared with the group.
+//  codes/{code}           join code -> group id.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function tokenEmail() { return request.auth.token.get('email', '').lower(); }
+    function verified() { return signedIn() && request.auth.token.get('email_verified', false) == true && tokenEmail() != ''; }
+    function isSuper() { return verified() && tokenEmail() == 'swheel17@gmail.com'; }
+    function profilePath() { return /databases/$(database)/documents/users/$(me()); }
+    function isAdmin() { return signedIn() && (isSuper() || (exists(profilePath()) && get(profilePath()).data.get('admin', false) == true)); }
+    function isApproved() { return signedIn() && (isAdmin() || (exists(profilePath()) && get(profilePath()).data.get('approved', false) == true)); }
+    function changedKeys() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function shortText(v, n) { return v is string && v.size() <= n; }
+    function grp(g) { return get(/databases/$(database)/documents/groups/$(g)).data; }
+
     match /scenarios/{id} {
       allow get: if true;
-      allow list: if request.auth != null && resource.data.owner == request.auth.uid;
-      allow create: if request.auth != null
-        && request.resource.data.owner == request.auth.uid
+      allow list: if signedIn() && resource.data.owner == me();
+      allow create: if signedIn()
+        && request.resource.data.owner == me()
         && request.resource.data.data is string && request.resource.data.data.size() < 900000
-        && request.resource.data.title is string && request.resource.data.title.size() <= 120;
-      allow update: if request.auth != null
-        && resource.data.owner == request.auth.uid
+        && shortText(request.resource.data.title, 120);
+      allow update: if signedIn()
+        && resource.data.owner == me()
         && request.resource.data.owner == resource.data.owner
         && request.resource.data.data is string && request.resource.data.data.size() < 900000
-        && request.resource.data.title is string && request.resource.data.title.size() <= 120;
-      allow delete: if request.auth != null && resource.data.owner == request.auth.uid;
+        && shortText(request.resource.data.title, 120);
+      allow delete: if signedIn() && resource.data.owner == me();
     }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (uid == me() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if signedIn() && uid == me()
+        && request.resource.data.approved == false
+        && request.resource.data.admin == false
+        && shortText(request.resource.data.name, 60);
+      allow update: if signedIn() && (
+        (uid == me() && changedKeys().hasOnly(['name', 'email']) && shortText(request.resource.data.name, 60))
+        || (isAdmin() && changedKeys().hasOnly(['approved']))
+        || (isSuper() && changedKeys().hasOnly(['approved', 'admin'])));
+      allow delete: if isSuper();
+
+      match /inbox/{sid} {
+        allow read, delete: if signedIn() && uid == me();
+        allow create, update: if signedIn()
+          && request.resource.data.by == me()
+          && request.resource.data.sid == sid
+          && shortText(request.resource.data.title, 120)
+          && shortText(request.resource.data.byName, 60);
+      }
+    }
+
+    match /emails/{email} {
+      allow get: if signedIn();
+      allow create, update: if verified() && email == tokenEmail()
+        && request.resource.data.uid == me()
+        && shortText(request.resource.data.name, 60);
+      allow delete: if signedIn() && resource.data.uid == me();
+    }
+
+    match /hub/{sid} {
+      allow get: if signedIn() && (resource == null || resource.data.tier == 'public' || isApproved());
+      allow list: if signedIn() && (resource.data.tier == 'public' || isApproved());
+      allow create, update: if signedIn()
+        && request.resource.data.by == me()
+        && request.resource.data.sid == sid
+        && (resource == null || resource.data.by == me())
+        && get(/databases/$(database)/documents/scenarios/$(sid)).data.owner == me()
+        && (request.resource.data.tier == 'public' || (request.resource.data.tier == 'approved' && isApproved()))
+        && shortText(request.resource.data.title, 120)
+        && shortText(request.resource.data.byName, 60);
+      allow delete: if signedIn() && (resource.data.by == me() || isAdmin());
+    }
+
+    match /groups/{gid} {
+      allow get, list: if signedIn() && me() in resource.data.members;
+      allow create: if signedIn()
+        && request.resource.data.owner == me()
+        && request.resource.data.members == [me()]
+        && request.resource.data.leaders == [me()]
+        && request.resource.data.banned == []
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60;
+      allow delete: if signedIn() && resource.data.owner == me();
+      allow update: if signedIn() && request.resource.data.owner == resource.data.owner && (
+        // owner: anything, as long as they stay owner, member and leader, and every leader is a member
+        (resource.data.owner == me()
+          && me() in request.resource.data.members && me() in request.resource.data.leaders
+          && request.resource.data.members.hasAll(request.resource.data.leaders)
+          && shortText(request.resource.data.name, 60))
+        // leader: remove members who aren't leaders, ban or let back in, change the join code
+        || (me() in resource.data.leaders
+          && changedKeys().hasOnly(['members', 'banned', 'names', 'code'])
+          && resource.data.members.hasAll(request.resource.data.members)
+          && request.resource.data.members.hasAll(resource.data.leaders))
+        // anyone holding the join code: add themselves, unless they were removed
+        || (!(me() in resource.data.members) && !(me() in resource.data.banned)
+          && changedKeys().hasOnly(['members', 'names'])
+          && request.resource.data.members.hasAll(resource.data.members)
+          && request.resource.data.members.hasOnly(resource.data.members.concat([me()]))
+          && request.resource.data.names.diff(resource.data.names).affectedKeys().hasOnly([me()]))
+        // member who isn't a leader: leave
+        || (me() in resource.data.members && !(me() in resource.data.leaders)
+          && changedKeys().hasOnly(['members', 'names'])
+          && resource.data.members.hasAll(request.resource.data.members)
+          && !(me() in request.resource.data.members)
+          && request.resource.data.members.size() == resource.data.members.size() - 1
+          && request.resource.data.names.diff(resource.data.names).affectedKeys().hasOnly([me()])));
+
+      match /items/{sid} {
+        allow read: if signedIn() && me() in grp(gid).members;
+        allow create, update: if signedIn() && me() in grp(gid).members
+          && request.resource.data.by == me()
+          && request.resource.data.sid == sid
+          && (resource == null || resource.data.by == me())
+          && shortText(request.resource.data.title, 120)
+          && shortText(request.resource.data.byName, 60);
+        allow delete: if signedIn() && (resource.data.by == me() || me() in grp(gid).leaders);
+      }
+    }
+
+    match /codes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn() && me() in grp(request.resource.data.gid).leaders;
+      allow delete: if signedIn() && me() in grp(resource.data.gid).leaders;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

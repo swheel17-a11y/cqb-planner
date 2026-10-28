@@ -130,6 +130,16 @@ button.link{background:none;border:0;padding:4px 2px;color:var(--accent);font-we
 .lib-local h3{margin:0;font-size:15px}
 #short-link{min-height:0;height:auto;resize:none;font-family:var(--f-mono);font-size:13px}
 a.btn{text-decoration:none;display:inline-block}
+.hub-tabs{flex-wrap:wrap}
+.hub-body{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.hub-forms{display:flex;flex-direction:column;gap:10px}
+.hub-forms .row input,#shareto .row input,.acct-verify+.field .row input,#acct-in .field .row input{flex:1;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--sheet)}
+.hub-forms .row,#shareto .row,#acct-in .field .row{flex-wrap:nowrap}
+.hub-code{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border:1px dashed var(--accent);border-radius:10px}
+.hub-code b{font-family:var(--f-mono);font-size:18px;letter-spacing:.12em;flex:1}
+.hub-note,.acct-verify{padding:10px 12px;border-radius:8px;background:color-mix(in srgb,var(--accent) 12%,transparent);font-size:14px;display:flex;flex-direction:column;gap:8px}
+#acct-in{display:flex;flex-direction:column;gap:12px}
+#acct-in[hidden]{display:none}
 .lib-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .lib-row.cur .lib-main b{color:var(--accent)}
 .lib-main{flex:1 1 180px;min-width:0;display:flex;flex-direction:column}
@@ -278,6 +288,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
     <div class="acts">
       <button class="ib" id="btn-undo" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 6L4 11l5 5"/><path d="M4 11h10a5 5 0 0 1 0 10h-3"/></svg></button>
       <button class="ib hide-narrow" id="btn-redo" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 6l5 5-5 5"/><path d="M20 11H10a5 5 0 0 0 0 10h3"/></svg></button>
+      <button class="ib" id="btn-hub" title="Hub and groups" aria-label="Hub and groups"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 19c.8-3 3-4.8 5.5-4.8s4.7 1.8 5.5 4.8"/><path d="M14 14.6c.9-.6 1.9-.9 3-.9 2.2 0 3.9 1.5 4.5 4.3"/></svg></button>
       <button class="ib acct" id="btn-acct" title="Sign in" aria-label="Sign in"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span id="acct-initial" aria-hidden="true"></span></button>
       <button class="ib" id="btn-lib" title="My scenarios" aria-label="My scenarios"><svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/></svg></button>
       <button class="ib" id="btn-brief" title="Briefing" aria-label="Briefing"><svg viewBox="0 0 24 24"><path d="M9 3h6v3H9z"/><path d="M7 5H5v16h14V5h-2"/><path d="M8 11h8M8 15h5"/></svg></button>
@@ -378,7 +389,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
             <div class="row"><button class="btn primary" id="short-signin">Sign in</button></div></div>
           <div id="short-in" hidden><p id="short-help"></p>
             <textarea id="short-link" readonly aria-label="Short link" rows="1" hidden></textarea>
-            <div class="row"><button class="btn primary" id="short-make">Get the link</button><button class="btn" id="short-copy" hidden>Copy link</button></div></div>
+            <div class="row"><button class="btn primary" id="short-make">Get the link</button><button class="btn" id="short-copy" hidden>Copy link</button><button class="btn" id="short-hub">Hub, groups or people…</button></div></div>
         </div>
         <div class="block">
           <h3>Long link</h3>
@@ -470,6 +481,28 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
     </div>
   </div>
 
+  <div class="overlay" id="hub" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="hub-h">
+      <div class="sheet-head"><div><div class="eyebrow">Shared drills</div><h2 id="hub-h">Hub</h2></div><button class="ib" data-close="hub" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div id="hub-out"><p id="hub-out-msg" style="margin:0"></p><div class="row"><button class="btn primary" id="hub-signin">Sign in</button></div></div>
+      <div id="hub-in" hidden>
+        <div class="seg hub-tabs" id="hub-tabs" role="group" aria-label="Section"><button data-tab="hub" aria-pressed="true">Hub</button><button data-tab="shared" aria-pressed="false">Shared with me</button><button data-tab="groups" aria-pressed="false">Groups</button><button data-tab="admin" aria-pressed="false" hidden>Admin</button></div>
+        <div id="hub-body" class="hub-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="shareto" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="shareto-h">
+      <div class="sheet-head"><div><div class="eyebrow" id="shareto-title"></div><h2 id="shareto-h">Share</h2></div><button class="ib" data-close="shareto" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="block" style="border-top:0;padding-top:0"><h3>Hub</h3><div id="shareto-hub"></div></div>
+      <div class="block"><h3>Your groups</h3><div id="shareto-groups"></div></div>
+      <div class="block"><h3>A person</h3><p>Type the email they signed in with. It shows up under Hub → Shared with me.</p>
+        <div class="row"><input id="shareto-email" type="email" inputmode="email" placeholder="name@example.com" aria-label="Their email"><button class="btn primary" id="shareto-send">Send</button></div></div>
+      <p class="small" style="margin:0">Everyone sees the latest version you saved. Anyone holding the drill’s link can open it.</p>
+    </div>
+  </div>
+
   <div class="overlay" id="acct" hidden>
     <div class="sheet" role="dialog" aria-labelledby="acct-h">
       <div class="sheet-head"><div><div class="eyebrow">Account</div><h2 id="acct-h">Sign in</h2></div><button class="ib" data-close="acct" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
@@ -486,7 +519,11 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
       <div id="acct-in" hidden>
         <p style="margin:0">Signed in as <b id="acct-who"></b>.</p>
         <p class="small" style="margin:0">Your scenarios are saved to your account. Sign in with the same account on any phone or computer to open them.</p>
-        <div class="row"><button class="btn primary" id="acct-lib">My scenarios</button><button class="btn" id="acct-signout">Sign out</button></div>
+        <div class="acct-verify" id="acct-verify" hidden><p style="margin:0"><b>Verify your email</b> so people can share drills with you by email. We sent you a link.</p>
+          <div class="row"><button class="btn sm" id="acct-verify-send">Send it again</button><button class="btn sm" id="acct-verify-done">I’ve verified it</button></div></div>
+        <div class="field"><label for="acct-name">Your name (what others see)</label><div class="row"><input id="acct-name" type="text" maxlength="60" autocomplete="name"><button class="btn" id="acct-name-save">Save</button></div></div>
+        <p class="small" id="acct-role" style="margin:0"></p>
+        <div class="row"><button class="btn primary" id="acct-lib">My scenarios</button><button class="btn" id="acct-admin" hidden>Admin</button><button class="btn" id="acct-signout">Sign out</button></div>
       </div>
       <p class="acct-err" id="acct-err" role="alert" hidden></p>
     </div>
@@ -3274,7 +3311,8 @@ function cloudInit(){
       const changedUser = (fbUser && fbUser.uid) !== (u && u.uid); fbUser = u;
       try{ u ? localStorage.setItem('cqb-signed-in', '1') : localStorage.removeItem('cqb-signed-in'); }catch(e){}
       if(changedUser){ cloudList = null; if(libCurrent && String(libCurrent).startsWith('c:')) libCurrent = null; }
-      renderAcct(); updateAcctBtn(); if(!$('#lib').hidden) refreshLib(); if(!$('#share').hidden) renderShort();
+      if(u){ if(changedUser) ensureProfile(); } else { me = null; myGroups = null; }
+      renderAcct(); updateAcctBtn(); if(!$('#lib').hidden) refreshLib(); if(!$('#share').hidden) renderShort(); if(!$('#hub').hidden) renderHub();
       if(first){ first = false; res(); } }); });
     try{ await fb.auth.getRedirectResult(); }catch(e){ acctErr(e); }
     return fb;
@@ -3316,7 +3354,12 @@ function renderAcct(){
   const off = !CLOUD_OK, inn = !!fbUser;
   $('#acct-offsite').hidden = !off; $('#acct-out').hidden = off || inn; $('#acct-in').hidden = off || !inn;
   $('#acct-h').textContent = inn ? 'Your account' : 'Sign in';
-  if(inn) $('#acct-who').textContent = fbUser.email || fbUser.displayName || 'your account';
+  if(inn){ $('#acct-who').textContent = fbUser.email || fbUser.displayName || 'your account';
+    const nm = $('#acct-name'); if(document.activeElement !== nm) nm.value = (typeof me!=='undefined' && me && me.name) || fbUser.displayName || '';
+    const pw = (fbUser.providerData||[]).some(p => p && p.providerId==='password');
+    $('#acct-verify').hidden = !(pw && !fbUser.emailVerified);
+    $('#acct-admin').hidden = !(typeof amAdmin==='function' && amAdmin());
+    $('#acct-role').textContent = typeof amAdmin!=='function' ? '' : amAdmin() ? 'Admin: you approve accounts and look after the hub.' : amApproved() ? 'Approved: you can see and post to the approved hub.' : 'Not approved yet for the approved hub. Everything else works.'; }
 }
 function openAcct(){ pause(); $('#acct-err').hidden = true; renderAcct(); $('#acct').hidden = false;
   if(CLOUD_OK && !fb){ $('#acct-out').classList.add('busy'); cloudInit().catch(acctErr).finally(() => $('#acct-out').classList.remove('busy')); } }
@@ -3328,7 +3371,7 @@ $('#acct-google').addEventListener('click', () => acctDo(async () => { const p =
   try{ await fb.auth.signInWithPopup(p); }catch(e){ if(e && (e.code==='auth/popup-blocked' || e.code==='auth/operation-not-supported-in-this-environment')) await fb.auth.signInWithRedirect(p); else throw e; }
   toast('Signed in'); }));
 $('#acct-signin').addEventListener('click', () => acctDo(async () => { await fb.auth.signInWithEmailAndPassword(acctEmail(), acctPw()); toast('Signed in'); }));
-$('#acct-create').addEventListener('click', () => acctDo(async () => { await fb.auth.createUserWithEmailAndPassword(acctEmail(), acctPw()); toast('Account created · you’re signed in'); }));
+$('#acct-create').addEventListener('click', () => acctDo(async () => { const c = await fb.auth.createUserWithEmailAndPassword(acctEmail(), acctPw()); try{ await c.user.sendEmailVerification(); }catch(e){} toast('Account created · check your email to verify it'); renderAcct(); }));
 $('#acct-reset').addEventListener('click', () => acctDo(async () => { if(!acctEmail()){ const e = new Error(); e.code = 'auth/invalid-email'; throw e; }
   await fb.auth.sendPasswordResetEmail(acctEmail()); const el = $('#acct-err'); el.textContent = 'Check your email for a link to set a new password.'; el.hidden = false; }));
 $('#acct-pw').addEventListener('keydown', e => { if(e.key==='Enter') $('#acct-signin').click(); });
@@ -3376,7 +3419,7 @@ function libRows(list, cloud){
     const ro = cloud ? /"ro":1/.test(e.text) : e.data && e.data.ro;
     return `<div class="lib-row ${e.id===libCurrent?'cur':''}" data-id="${e.id}">
       <div class="lib-main"><b>${esc(e.title)}</b><span class="small">${ro ? 'View only · ' : ''}${libFmt(e.updated)} · ${kb} KB</span></div>
-      <button class="btn sm" data-lo="${e.id}">Open</button>${cloud ? `<button class="btn sm" data-ll="${e.id}">Link</button>` : ''}<button class="btn sm" data-lr="${e.id}">Rename</button><button class="btn sm danger" data-ld="${e.id}" aria-label="Delete ${esc(e.title)}">✕</button></div>`; }).join('');
+      <button class="btn sm" data-lo="${e.id}">Open</button>${cloud ? `<button class="btn sm" data-ll="${e.id}">Link</button><button class="btn sm" data-ls="${e.id}">Share</button>` : ''}<button class="btn sm" data-lr="${e.id}">Rename</button><button class="btn sm danger" data-ld="${e.id}" aria-label="Delete ${esc(e.title)}">✕</button></div>`; }).join('');
 }
 function renderLib(){
   const inn = !!fbUser, local = libRead(), cl = cloudList || [], cur = libEntry(libCurrent), dirty = cur && libSavedVer !== ver;
@@ -3403,6 +3446,7 @@ function shortLink(doc, ro){ return SITE_URL + '#p=' + doc + (ro ? '' : '&e=1');
 function copyText(txt, okMsg, ta){ const fallback = () => { if(ta){ ta.focus(); ta.select(); } toast('Selected · copy it from your keyboard menu'); };
   try{ navigator.clipboard.writeText(txt).then(() => toast(okMsg), fallback); }catch(e){ fallback(); } }
 $('#lib-list').addEventListener('click', async e => {
+  const sh = e.target.closest('[data-ls]'); if(sh){ const en = libEntry(sh.dataset.ls); if(en){ $('#lib').hidden = true; openShareTo(en.doc, en.title); } return; }
   const o = e.target.closest('[data-lo]'), r = e.target.closest('[data-lr]'), d = e.target.closest('[data-ld]'), l = e.target.closest('[data-ll]'), up = e.target.closest('#lib-upload');
   if(o){ const go = () => libOpen(o.dataset.lo);
     if(libSavedVer !== ver && !(libCurrent===null && undoStack.length===0)) confirmAsk('Open it? Changes you haven’t saved stay in Undo.', 'Open', go); else go(); }
@@ -3421,7 +3465,7 @@ $('#lib-list').addEventListener('click', async e => {
     inp.addEventListener('keydown', ev => { if(ev.key==='Enter') done(); if(ev.key==='Escape'){ done1 = true; renderLib(); } }); inp.addEventListener('blur', done); }
   if(d){ const id = d.dataset.ld, en = libEntry(id); if(!en) return;
     confirmAsk(`Delete “${en.title}”?${isCloudId(id) ? ' Short links to it will stop working.' : ''}`, 'Delete', async () => {
-      if(isCloudId(id)){ try{ await cloudCol().doc(en.doc).delete(); cloudList = (cloudList||[]).filter(x => x.id!==id); }catch(err){ toast('Couldn’t delete · check your connection'); } }
+      if(isCloudId(id)){ try{ await fb.db.collection('hub').doc(en.doc).delete().catch(() => {}); await cloudCol().doc(en.doc).delete(); cloudList = (cloudList||[]).filter(x => x.id!==id); }catch(err){ toast('Couldn’t delete · check your connection'); } }
       else libWrite(libRead().filter(x => x.id!==id));
       if(libCurrent===id) libCurrent = null; renderLib(); $('#lib').hidden = false; }); }
   if(up){ const local = libRead(); if(!local.length || cloudBusy) return; cloudBusy = true; libBusy(true); let n = 0;
@@ -3462,6 +3506,10 @@ $('#short-make').addEventListener('click', async () => { if(cloudBusy) return; c
     copyText($('#short-link').value, 'Short link copied · paste it into a text or Discord', $('#short-link')); }
   catch(e){ toast(e && e.code==='permission-denied' ? 'The database refused the save · check the Firestore rules' : 'Couldn’t save to your account · check your connection'); }
   finally{ cloudBusy = false; $('#short-make').disabled = false; } });
+$('#short-hub').addEventListener('click', async () => { if(cloudBusy) return; cloudBusy = true; $('#short-hub').disabled = true;
+  try{ const doc = (isCloudId(libCurrent) && libSavedVer === ver) ? String(libCurrent).slice(2) : await cloudSave(false, S.title); shortDoc = doc; renderShort(); $('#share').hidden = true; openShareTo(doc, S.title || 'Untitled scenario'); }
+  catch(e){ toast('Couldn’t save to your account · check your connection'); }
+  finally{ cloudBusy = false; $('#short-hub').disabled = false; } });
 $('#short-copy').addEventListener('click', () => copyText($('#short-link').value, 'Short link copied · paste it into a text or Discord', $('#short-link')));
 $('#short-signin').addEventListener('click', () => { $('#share').hidden = true; openAcct(); });
 async function openShortLink(doc, edit){
@@ -3477,6 +3525,235 @@ async function openShortLink(doc, edit){
     openSheet('brief');
   }catch(e){ toast(e && e.message==='offsite' ? 'Short links open on the planner’s website' : 'Couldn’t open that link · check your connection'); }
 }
+
+/* ---------------- hub, groups, sharing, admin ----------------
+   Profiles: users/{uid} {name, email, approved, admin}; emails/{email} lets "share with" find a verified account by exact email.
+   Hub: hub/{sid} entries point at a saved scenario, tier 'public' (any account) or 'approved' (accounts an admin approved).
+   Groups: groups/{gid} {name, owner, leaders[], members[], banned[], names{uid:name}, code}; codes/{code} -> gid.
+   Owner can do anything; leaders remove members (not other leaders) and change the code; members can leave.
+   Removed people go on the banned list so the old code won't let them back in. Drills shared to a group live in
+   groups/{gid}/items/{sid}; drills sent to a person in users/{uid}/inbox/{sid}. Opening any of them loads the scenario by id. */
+const SUPER_EMAIL = 'swheel17@gmail.com';
+let me = null, myGroups = null, hubTab = 'hub', hubTier = 'public', groupOpen = null, shareSid = null;
+const users = () => fb.db.collection('users'), FV = () => firebase.firestore.FieldValue;
+const myName = () => (me && me.name) || (fbUser && (fbUser.displayName || (fbUser.email||'').split('@')[0])) || 'Someone';
+const isVerified = () => !!(fbUser && fbUser.emailVerified && fbUser.email);
+const isSuperUser = () => isVerified() && fbUser.email.toLowerCase() === SUPER_EMAIL;
+const amAdmin = () => isSuperUser() || !!(me && me.admin);
+const amApproved = () => amAdmin() || !!(me && me.approved);
+function dbErr(e, what){ const code = e && e.code; toast(code==='permission-denied' ? `Not allowed to ${what} · if this keeps happening, the database rules need updating` : `Couldn’t ${what} · check your connection`); console.warn(what, e); }
+async function ensureProfile(){
+  if(!fbUser){ me = null; myGroups = null; return; }
+  const ref = users().doc(fbUser.uid);
+  try{
+    let snap = await ref.get();
+    if(!snap.exists){ const name = String(fbUser.displayName || (fbUser.email||'').split('@')[0] || 'New user').slice(0,60);
+      await ref.set({name, email:(fbUser.email||'').toLowerCase(), approved:false, admin:false, created:FV().serverTimestamp()}); snap = await ref.get(); }
+    const v = snap.data() || {}; me = {uid:fbUser.uid, name:v.name || 'New user', email:v.email || '', approved:!!v.approved, admin:!!v.admin};
+    if(isVerified()) await fb.db.collection('emails').doc(fbUser.email.toLowerCase()).set({uid:fbUser.uid, name:me.name}).catch(e => console.warn('email claim', e));
+  }catch(e){ console.warn('profile', e); me = {uid:fbUser.uid, name:myName(), email:(fbUser.email||'').toLowerCase(), approved:false, admin:false}; }
+  renderAcct(); if(!$('#hub').hidden) renderHub();
+}
+async function saveMyName(){
+  const v = ($('#acct-name').value || '').trim().slice(0,60); if(!v || !fbUser) return;
+  try{ await users().doc(fbUser.uid).update({name:v}); if(me) me.name = v;
+    if(isVerified()) await fb.db.collection('emails').doc(fbUser.email.toLowerCase()).set({uid:fbUser.uid, name:v});
+    toast('Name saved'); }catch(e){ dbErr(e, 'save your name'); }
+}
+$('#acct-name-save').addEventListener('click', saveMyName);
+$('#acct-name').addEventListener('keydown', e => { if(e.key==='Enter') saveMyName(); });
+$('#acct-verify-send').addEventListener('click', async () => { try{ await fbUser.sendEmailVerification(); toast('Verification email sent · check your inbox'); }catch(e){ acctErr(e); } });
+$('#acct-verify-done').addEventListener('click', async () => { try{ await fbUser.reload(); fbUser = fb.auth.currentUser; await fbUser.getIdToken(true);
+  if(fbUser.emailVerified){ toast('Email verified'); await ensureProfile(); } else toast('Not verified yet · open the link in the email first'); renderAcct(); }catch(e){ acctErr(e); } });
+$('#acct-admin').addEventListener('click', () => { $('#acct').hidden = true; openHub('admin'); });
+
+/* ---- data helpers ---- */
+async function loadMyGroups(){
+  const snap = await fb.db.collection('groups').where('members', 'array-contains', fbUser.uid).get();
+  myGroups = snap.docs.map(d => Object.assign({id:d.id}, d.data())).sort((a,b) => String(a.name).localeCompare(String(b.name)));
+  return myGroups;
+}
+function roleIn(g, uid){ return g.owner===uid ? 'owner' : (g.leaders||[]).includes(uid) ? 'leader' : 'member'; }
+const ROLE_LABEL = {owner:'Owner', leader:'Leader', member:'Member'};
+function newCode(){ const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = new Uint8Array(8); crypto.getRandomValues(r); return Array.from(r, x => a[x % a.length]).join(''); }
+const fmtDay = t => { try{ return new Date(t).toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'}); }catch(e){ return ''; } };
+async function openSid(sid){ $('#hub').hidden = true; await openShortLink(sid, false); }
+async function copySid(sid){
+  try{ const snap = await cloudCol().doc(sid).get(); if(!snap.exists){ toast('That drill was deleted'); return; }
+    const d = JSON.parse(snap.data().data); d.ro = 0; loadScenario(d); setMode('plan');
+    await cloudSave(true, d.t || snap.data().title); $('#hub').hidden = true; toast('Copied to your account · it’s yours to change'); }
+  catch(e){ dbErr(e, 'copy that drill'); }
+}
+
+/* ---- hub sheet ---- */
+function openHub(tab){ pause(); if(tab) hubTab = tab; groupOpen = null; $('#hub').hidden = false; renderHub(); if(CLOUD_OK && !fb) cloudInit().then(renderHub).catch(() => {}); }
+$('#btn-hub').addEventListener('click', () => openHub());
+$('#hub-tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if(!b) return; hubTab = b.dataset.tab; groupOpen = null; renderHub(); });
+$('#hub-signin').addEventListener('click', () => { $('#hub').hidden = true; openAcct(); });
+function hubBusy(msg){ $('#hub-body').innerHTML = `<p class="small" style="margin:0">${msg}</p>`; }
+async function renderHub(){
+  const inn = !!fbUser && CLOUD_OK;
+  $('#hub-out').hidden = inn; $('#hub-in').hidden = !inn;
+  $('#hub-out-msg').textContent = CLOUD_OK ? 'Sign in to see the hub, join groups and see drills shared with you.' : 'The hub works on the planner’s website, where you can sign in.';
+  $('#hub-signin').hidden = !CLOUD_OK;
+  if(!inn) return;
+  document.querySelectorAll('#hub-tabs [data-tab]').forEach(b => { b.setAttribute('aria-pressed', String(b.dataset.tab===hubTab)); if(b.dataset.tab==='admin') b.hidden = !amAdmin(); });
+  const tab = hubTab;
+  try{
+    if(tab==='hub') await renderHubList();
+    else if(tab==='shared') await renderShared();
+    else if(tab==='groups') await (groupOpen ? renderGroup(groupOpen) : renderGroups());
+    else if(tab==='admin') await renderAdmin();
+  }catch(e){ if(tab===hubTab) hubBusy('Couldn’t load this. ' + (e && e.code==='permission-denied' ? 'The database rules may need updating.' : 'Check your connection and try again.')); console.warn(e); }
+}
+function rowHtml(o){ return `<div class="lib-row"><div class="lib-main"><b>${esc(o.title)}</b><span class="small">${o.sub}</span></div>${o.btns}</div>`; }
+async function renderHubList(){
+  const appr = amApproved();
+  let h = `<div class="seg" id="hub-tier" role="group" aria-label="Which hub"><button data-tier="public" aria-pressed="${hubTier==='public'}">Public</button><button data-tier="approved" aria-pressed="${hubTier==='approved'}">Approved</button></div>`;
+  h += `<p class="small" style="margin:0">${hubTier==='public' ? 'Drills anyone with an account can see.' : 'Drills only approved accounts can see.'} Post your own from My scenarios → Share.</p>`;
+  if(hubTier==='approved' && !appr){ $('#hub-body').innerHTML = h + '<div class="hub-note">Your account isn’t approved yet. The admin approves accounts for the approved hub. Until then you can use the public hub, groups and sharing.</div>'; return; }
+  $('#hub-body').innerHTML = h + '<p class="small" style="margin:0">Loading…</p>';
+  const q = hubTier==='public' ? fb.db.collection('hub').where('tier', '==', 'public') : fb.db.collection('hub').where('tier', '==', 'approved');
+  const list = (await q.get()).docs.map(d => d.data()).sort((a,b) => tsMs(b.at) - tsMs(a.at));
+  if(hubTab!=='hub') return;
+  $('#hub-body').innerHTML = h + (list.length ? list.map(x => rowHtml({title:x.title, sub:`${esc(x.byName||'Someone')} · ${fmtDay(tsMs(x.at))}`,
+      btns:`<button class="btn sm" data-open="${x.sid}">Open</button><button class="btn sm" data-copy="${x.sid}">Copy to mine</button>${x.by===fbUser.uid || amAdmin() ? `<button class="btn sm danger" data-unhub="${x.sid}" aria-label="Take off the hub">✕</button>` : ''}`})).join('')
+    : '<p class="small" style="margin:0">Nothing here yet.</p>');
+}
+async function renderShared(){
+  hubBusy('Loading…');
+  const inbox = (await users().doc(fbUser.uid).collection('inbox').get()).docs.map(d => Object.assign({src:'inbox'}, d.data()));
+  const groups = await loadMyGroups(); let items = [];
+  for(const g of groups){ try{ const s = await fb.db.collection('groups').doc(g.id).collection('items').get(); items = items.concat(s.docs.map(d => Object.assign({src:'group', gid:g.id, gname:g.name, lead:(g.leaders||[]).includes(fbUser.uid)}, d.data()))); }catch(e){} }
+  const all = inbox.concat(items).filter(x => x.by !== fbUser.uid || x.src==='group').sort((a,b) => tsMs(b.at) - tsMs(a.at));
+  if(hubTab!=='shared') return;
+  $('#hub-body').innerHTML = '<p class="small" style="margin:0">Drills people sent you, and drills shared with your groups.</p>' + (all.length ? all.map(x => rowHtml({title:x.title,
+      sub:`From ${esc(x.byName||'someone')}${x.src==='group' ? ' · in ' + esc(x.gname) : ''} · ${fmtDay(tsMs(x.at))}`,
+      btns:`<button class="btn sm" data-open="${x.sid}">Open</button><button class="btn sm" data-copy="${x.sid}">Copy to mine</button>${x.src==='inbox' ? `<button class="btn sm danger" data-uninbox="${x.sid}" aria-label="Remove">✕</button>` : (x.by===fbUser.uid || x.lead) ? `<button class="btn sm danger" data-ungroup="${x.gid}|${x.sid}" aria-label="Remove from group">✕</button>` : ''}`})).join('')
+    : '<p class="small" style="margin:0">Nothing shared with you yet.</p>');
+}
+async function renderGroups(){
+  hubBusy('Loading…'); const groups = await loadMyGroups(); if(hubTab!=='groups' || groupOpen) return;
+  $('#hub-body').innerHTML = `<div class="hub-forms">
+      <div class="field"><label for="grp-new">New group</label><div class="row"><input id="grp-new" type="text" maxlength="60" placeholder="e.g. Team 2"><button class="btn primary" id="grp-create">Create</button></div></div>
+      <div class="field"><label for="grp-code">Join with a code</label><div class="row"><input id="grp-code" type="text" maxlength="12" placeholder="8-letter code" autocapitalize="characters"><button class="btn" id="grp-join">Join</button></div></div></div>
+    <h3 style="margin:6px 0 0">Your groups</h3>` + (groups.length ? groups.map(g => rowHtml({title:g.name, sub:`${ROLE_LABEL[roleIn(g, fbUser.uid)]} · ${(g.members||[]).length} member${(g.members||[]).length===1?'':'s'}`,
+      btns:`<button class="btn sm" data-gopen="${g.id}">Open</button>`})).join('') : '<p class="small" style="margin:0">You’re not in any groups yet. Create one, or join with a code from your group leader.</p>');
+}
+async function renderGroup(gid){
+  hubBusy('Loading…');
+  const snap = await fb.db.collection('groups').doc(gid).get();
+  if(!snap.exists || !(snap.data().members||[]).includes(fbUser.uid)){ groupOpen = null; toast('You’re no longer in that group'); return renderGroups(); }
+  const g = Object.assign({id:gid}, snap.data()), myRole = roleIn(g, fbUser.uid), lead = myRole!=='member', own = myRole==='owner', names = g.names || {};
+  let items = []; try{ items = (await fb.db.collection('groups').doc(gid).collection('items').get()).docs.map(d => d.data()).sort((a,b) => tsMs(b.at) - tsMs(a.at)); }catch(e){}
+  if(hubTab!=='groups' || groupOpen!==gid) return;
+  const nm = u => esc(names[u] || 'Member');
+  const mem = (g.members||[]).slice().sort((a,b) => ({owner:0,leader:1,member:2}[roleIn(g,a)] - {owner:0,leader:1,member:2}[roleIn(g,b)]) || String(names[a]||'').localeCompare(String(names[b]||'')));
+  let h = `<div class="row"><button class="btn sm" id="grp-back">← Groups</button></div>
+    <h3 style="margin:0">${esc(g.name)}</h3><p class="small" style="margin:0">You’re ${myRole==='owner'?'the owner':'a '+myRole}. ${own ? 'You can rename it, pick leaders, remove anyone and delete the group.' : lead ? 'Leaders can remove members and change the join code.' : ''}</p>`;
+  if(lead) h += `<div class="hub-code"><span class="small">Join code</span><b>${esc(g.code||'')}</b><button class="btn sm" id="grp-copycode">Copy</button><button class="btn sm" id="grp-newcode">New code</button></div>
+    <p class="small" style="margin:0">Text this code to people you want in the group. A new code stops the old one working.</p>`;
+  if(own) h += `<div class="field"><label for="grp-rename">Group name</label><div class="row"><input id="grp-rename" type="text" maxlength="60" value="${esc(g.name)}"><button class="btn sm" id="grp-rename-save">Rename</button></div></div>`;
+  h += `<h3 style="margin:6px 0 0">Members (${mem.length})</h3>` + mem.map(u => { const r = roleIn(g, u); let b = '';
+      if(own && u!==fbUser.uid) b += r==='leader' ? `<button class="btn sm" data-demote="${u}">Remove leader</button>` : `<button class="btn sm" data-promote="${u}">Make leader</button>`;
+      if(u!==fbUser.uid && (own || (lead && r==='member'))) b += `<button class="btn sm danger" data-kick="${u}">Remove</button>`;
+      return rowHtml({title:(names[u]||'Member') + (u===fbUser.uid ? ' (you)' : ''), sub:ROLE_LABEL[r], btns:b}); }).join('');
+  if(lead && (g.banned||[]).length) h += `<h3 style="margin:6px 0 0">Removed</h3><p class="small" style="margin:0">They can’t rejoin with the code until you let them back in.</p>` +
+    g.banned.map(u => rowHtml({title:names[u]||'Former member', sub:'Removed', btns:`<button class="btn sm" data-unban="${u}">Let back in</button>`})).join('');
+  h += `<h3 style="margin:6px 0 0">Drills shared here (${items.length})</h3>` + (items.length ? items.map(x => rowHtml({title:x.title, sub:`From ${esc(x.byName||'someone')} · ${fmtDay(tsMs(x.at))}`,
+      btns:`<button class="btn sm" data-open="${x.sid}">Open</button><button class="btn sm" data-copy="${x.sid}">Copy to mine</button>${x.by===fbUser.uid || lead ? `<button class="btn sm danger" data-ungroup="${gid}|${x.sid}" aria-label="Remove from group">✕</button>` : ''}`})).join('')
+    : '<p class="small" style="margin:0">Nothing yet. Share a drill from My scenarios → Share.</p>');
+  h += `<div class="row" style="margin-top:8px">${own ? '<button class="btn danger" id="grp-delete">Delete group</button>' : myRole==='member' ? '<button class="btn danger" id="grp-leave">Leave group</button>' : '<p class="small" style="margin:0">Leaders can’t leave. Ask the owner to remove your leader role first.</p>'}</div>`;
+  $('#hub-body').innerHTML = h; $('#hub-body').dataset.gid = gid; groupCache = g;
+}
+let groupCache = null;
+async function renderAdmin(){
+  if(!amAdmin()){ hubBusy('Admins only.'); return; }
+  hubBusy('Loading…');
+  const list = (await users().get()).docs.map(d => Object.assign({uid:d.id}, d.data())).sort((a,b) => (a.approved - b.approved) || String(a.name).localeCompare(String(b.name)));
+  if(hubTab!=='admin') return;
+  const waiting = list.filter(u => !u.approved && !u.admin).length;
+  $('#hub-body').innerHTML = `<p class="small" style="margin:0">${list.length} account${list.length===1?'':'s'} · ${waiting} waiting for approval. Approved accounts can see and post to the approved hub.${isSuperUser() ? ' You can also make other admins.' : ''}</p>` +
+    list.map(u => { const self = u.uid===fbUser.uid; let b = '';
+      if(u.email!==SUPER_EMAIL) b += u.approved ? `<button class="btn sm" data-unapprove="${u.uid}">Unapprove</button>` : `<button class="btn sm primary" data-approve="${u.uid}">Approve</button>`;
+      if(isSuperUser() && !self && u.email!==SUPER_EMAIL) b += u.admin ? `<button class="btn sm" data-unadmin="${u.uid}">Remove admin</button>` : `<button class="btn sm" data-mkadmin="${u.uid}">Make admin</button>`;
+      return rowHtml({title:(u.name||'New user') + (self ? ' (you)' : ''), sub:`${esc(u.email||'')} · ${u.email===SUPER_EMAIL ? 'Admin (owner)' : u.admin ? 'Admin' : u.approved ? 'Approved' : 'Not approved'}`, btns:b}); }).join('');
+}
+$('#hub-body').addEventListener('click', async e => {
+  const t = e.target.closest('button'); if(!t) return; const d = t.dataset, gid = $('#hub-body').dataset.gid, gref = gid ? fb.db.collection('groups').doc(gid) : null;
+  const run = async (fn, what, then) => { t.disabled = true; try{ await fn(); if(then) toast(then); }catch(err){ dbErr(err, what); } t.disabled = false; renderHub(); };
+  if(d.tier){ hubTier = d.tier; renderHub(); return; }
+  if(d.open) return openSid(d.open);
+  if(d.copy) return copySid(d.copy);
+  if(d.unhub) return confirmAsk('Take this drill off the hub? The drill itself isn’t deleted.', 'Take it off', () => run(() => fb.db.collection('hub').doc(d.unhub).delete(), 'take it off the hub', 'Taken off the hub').then(() => { $('#hub').hidden = false; }));
+  if(d.uninbox) return run(() => users().doc(fbUser.uid).collection('inbox').doc(d.uninbox).delete(), 'remove it', 'Removed');
+  if(d.ungroup){ const [g, s] = d.ungroup.split('|'); return run(() => fb.db.collection('groups').doc(g).collection('items').doc(s).delete(), 'remove it from the group', 'Removed from the group'); }
+  if(d.gopen){ groupOpen = d.gopen; return renderHub(); }
+  if(t.id==='grp-back'){ groupOpen = null; $('#hub-body').dataset.gid = ''; return renderHub(); }
+  if(t.id==='grp-create'){ const name = ($('#grp-new').value||'').trim().slice(0,60); if(!name){ toast('Type a name for the group'); return; }
+    return run(async () => { const ref = fb.db.collection('groups').doc(), code = newCode();
+      await ref.set({name, owner:fbUser.uid, leaders:[fbUser.uid], members:[fbUser.uid], banned:[], names:{[fbUser.uid]:myName()}, code, created:FV().serverTimestamp()});
+      await fb.db.collection('codes').doc(code).set({gid:ref.id}); groupOpen = ref.id; }, 'create the group', 'Group created · text the join code to your guys'); }
+  if(t.id==='grp-join'){ const code = ($('#grp-code').value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,''); if(!code){ toast('Type the join code'); return; }
+    t.disabled = true;
+    try{ const c = await fb.db.collection('codes').doc(code).get(); if(!c.exists){ toast('No group uses that code · check it with your leader'); t.disabled = false; return; }
+      const g = c.data().gid; if((myGroups||[]).some(x => x.id===g)){ groupOpen = g; t.disabled = false; return renderHub(); }
+      await fb.db.collection('groups').doc(g).update({members:FV().arrayUnion(fbUser.uid), ['names.'+fbUser.uid]:myName()}); groupOpen = g; toast('You joined the group'); }
+    catch(err){ if(err && err.code==='permission-denied') toast('You can’t join that group · ask a leader to let you back in'); else dbErr(err, 'join'); }
+    t.disabled = false; return renderHub(); }
+  if(t.id==='grp-copycode') return copyText(groupCache.code, 'Join code copied');
+  if(t.id==='grp-newcode') return confirmAsk('Make a new join code? The old code stops working.', 'New code', () => run(async () => { const code = newCode(), old = groupCache.code;
+      await fb.db.collection('codes').doc(code).set({gid}); await gref.update({code}); if(old) await fb.db.collection('codes').doc(old).delete().catch(() => {}); }, 'change the code', 'New join code made').then(() => { $('#hub').hidden = false; }));
+  if(t.id==='grp-rename-save'){ const name = ($('#grp-rename').value||'').trim().slice(0,60); if(name) return run(() => gref.update({name}), 'rename the group', 'Renamed'); return; }
+  if(d.promote) return run(() => gref.update({leaders:FV().arrayUnion(d.promote)}), 'make them a leader', 'Now a leader');
+  if(d.demote) return run(() => gref.update({leaders:FV().arrayRemove(d.demote)}), 'change their role', 'Leader role removed');
+  if(d.kick){ const who = (groupCache.names||{})[d.kick] || 'this member';
+    return confirmAsk(`Remove ${who} from ${groupCache.name}? They won’t be able to rejoin with the code.`, 'Remove', () => run(() => gref.update({members:FV().arrayRemove(d.kick), leaders:FV().arrayRemove(d.kick), banned:FV().arrayUnion(d.kick)}), 'remove them', 'Removed from the group').then(() => { $('#hub').hidden = false; })); }
+  if(d.unban) return run(() => gref.update({banned:FV().arrayRemove(d.unban)}), 'let them back in', 'They can rejoin with the code');
+  if(t.id==='grp-leave') return confirmAsk(`Leave ${groupCache.name}?`, 'Leave', () => run(async () => { await gref.update({members:FV().arrayRemove(fbUser.uid), ['names.'+fbUser.uid]:FV().delete()}); groupOpen = null; }, 'leave the group', 'You left the group').then(() => { $('#hub').hidden = false; }));
+  if(t.id==='grp-delete') return confirmAsk(`Delete ${groupCache.name} for everyone? The drills themselves aren’t deleted.`, 'Delete group', () => run(async () => {
+      try{ const its = await gref.collection('items').get(); for(const x of its.docs) await x.ref.delete(); }catch(err){}
+      if(groupCache.code) await fb.db.collection('codes').doc(groupCache.code).delete().catch(() => {}); await gref.delete(); groupOpen = null; }, 'delete the group', 'Group deleted').then(() => { $('#hub').hidden = false; }));
+  if(d.approve) return run(() => users().doc(d.approve).update({approved:true}), 'approve', 'Approved');
+  if(d.unapprove) return run(() => users().doc(d.unapprove).update({approved:false}), 'unapprove', 'Unapproved');
+  if(d.mkadmin) return run(() => users().doc(d.mkadmin).update({admin:true, approved:true}), 'make them admin', 'Now an admin');
+  if(d.unadmin) return run(() => users().doc(d.unadmin).update({admin:false}), 'change their role', 'Admin removed');
+});
+
+/* ---- share one saved drill: hub, groups, people ---- */
+async function openShareTo(sid, title){
+  shareSid = sid; $('#shareto-title').textContent = title || 'This drill'; $('#shareto').hidden = false; $('#shareto-email').value = '';
+  $('#shareto-hub').innerHTML = '<p class="small" style="margin:0">Loading…</p>'; $('#shareto-groups').innerHTML = '';
+  try{
+    let cur = null; try{ const h = await fb.db.collection('hub').doc(sid).get(); cur = h.exists ? h.data() : null; }catch(e){}
+    const appr = amApproved();
+    $('#shareto-hub').innerHTML = (cur ? `<p style="margin:0">On the <b>${cur.tier==='approved' ? 'approved' : 'public'} hub</b>.</p>` : '<p style="margin:0">Not on the hub.</p>') +
+      `<div class="row">${!cur || cur.tier!=='public' ? '<button class="btn" data-post="public">Post to public hub</button>' : ''}${(!cur || cur.tier!=='approved') && appr ? '<button class="btn" data-post="approved">Post to approved hub</button>' : ''}${cur ? '<button class="btn danger" data-post="off">Take it off</button>' : ''}</div>` +
+      (appr ? '' : '<p class="small" style="margin:0">The approved hub opens once the admin approves your account.</p>');
+    const groups = await loadMyGroups();
+    const there = await Promise.all(groups.map(g => fb.db.collection('groups').doc(g.id).collection('items').doc(sid).get().then(s => s.exists).catch(() => false)));
+    $('#shareto-groups').innerHTML = groups.length ? groups.map((g,i) => `<div class="lib-row"><div class="lib-main"><b>${esc(g.name)}</b><span class="small">${there[i] ? 'Shared' : (g.members||[]).length + ' members'}</span></div>${there[i] ? `<button class="btn sm" data-gun="${g.id}">Unshare</button>` : `<button class="btn sm primary" data-gshare="${g.id}">Share</button>`}</div>`).join('')
+      : '<p class="small" style="margin:0">You’re not in any groups. Make one in Hub → Groups.</p>';
+  }catch(e){ dbErr(e, 'load sharing'); }
+}
+function shareEntry(){ return {sid:shareSid, title:($('#shareto-title').textContent||'Untitled scenario').slice(0,120), by:fbUser.uid, byName:myName().slice(0,60), at:FV().serverTimestamp()}; }
+$('#shareto').addEventListener('click', async e => {
+  const t = e.target.closest('button'); if(!t || !shareSid) return; const d = t.dataset;
+  const run = async (fn, what, msg) => { t.disabled = true; try{ await fn(); toast(msg); }catch(err){ dbErr(err, what); } t.disabled = false; openShareTo(shareSid, $('#shareto-title').textContent); };
+  if(d.post==='off') return run(() => fb.db.collection('hub').doc(shareSid).delete(), 'take it off the hub', 'Taken off the hub');
+  if(d.post) return run(() => fb.db.collection('hub').doc(shareSid).set(Object.assign(shareEntry(), {tier:d.post})), 'post it', d.post==='approved' ? 'Posted to the approved hub' : 'Posted to the public hub');
+  if(d.gshare) return run(() => fb.db.collection('groups').doc(d.gshare).collection('items').doc(shareSid).set(shareEntry()), 'share with the group', 'Shared with the group');
+  if(d.gun) return run(() => fb.db.collection('groups').doc(d.gun).collection('items').doc(shareSid).delete(), 'unshare', 'Unshared');
+  if(t.id==='shareto-send'){ const email = ($('#shareto-email').value||'').trim().toLowerCase(); if(!/^\S+@\S+\.\S+$/.test(email)){ toast('Type their full email address'); return; }
+    t.disabled = true;
+    try{ const s = await fb.db.collection('emails').doc(email).get();
+      if(!s.exists){ toast('No account found for that email · they need to sign in once (and verify their email if they use a password)'); }
+      else if(s.data().uid===fbUser.uid){ toast('That’s you'); }
+      else { await users().doc(s.data().uid).collection('inbox').doc(shareSid).set(shareEntry()); toast('Sent to ' + (s.data().name || email)); $('#shareto-email').value = ''; } }
+    catch(err){ dbErr(err, 'send it'); }
+    t.disabled = false; }
+});
+$('#shareto-email').addEventListener('keydown', e => { if(e.key==='Enter') $('#shareto-send').click(); });
 
 /* ---------------- guided tour ----------------
    Spotlights one part of the screen at a time with a short explanation. Steps whose target isn't on screen
@@ -3495,6 +3772,7 @@ const TOUR = [
   {sel:'.modes', t:'3D and Walk', b:'<b>3D</b> shows the run from above; try <b>Drone</b>, a camera that follows the team. <b>Walk</b> puts you at eye level, or rides along with one shooter.'},
   {sel:'#btn-share', t:'Send it to the team', b:'Copy a <b>share link</b> to text or post, choose <b>view only</b> or <b>editable</b>, save a file, or <b>record a video</b> anyone can watch.'},
   {sel:'#btn-acct', t:'Sign in', b:'Sign in with Google or email to keep your scenarios online. Open them on any phone or computer, and send <b>short links</b> instead of long codes.'},
+  {sel:'#btn-hub', t:'Hub and groups', b:'Browse drills others posted to the <b>hub</b>, see drills <b>shared with you</b>, and make or join <b>groups</b> with a code. Share your own from My scenarios → Share.'},
   {sel:'#btn-lib', t:'My scenarios', b:'Save scenarios and reopen them later. Signed in, they live in your account; signed out, they stay on this device.'},
   {sel:'#btn-help', t:'That’s the basics', b:'Open the <b>Hall boss</b> or <b>T-intersection</b> drill under <b>Send or open → Start over</b> to see a full plan, and replay this tour from here any time.'}
 ];
