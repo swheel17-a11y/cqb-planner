@@ -1723,18 +1723,61 @@ function routeInsertOp(h, sx, sy){
   const w = it.path[i];
   return {move(x,y){ if(Math.hypot(x-sx,y-sy)<4) return; const q = toWorld(x,y); w.x = snap(q.x,1/6); w.y = snap(q.y,1/6); changed(); }, up(){ renderInspector(); }};
 }
+/* ---- personal space: people can't be put on top of each other ----
+   Where a person stands still (his start, the end of his route, or a waypoint where he does something) is kept at least
+   SPACE from where anyone else stands still. Dropping or dragging him closer pushes him back out, the way he'd step off a
+   teammate, and never through a wall. */
+const SPACE = 1.35/FT;
+let repelHit = null;   // who he was pushed off, for the hint after the drag
+function standSpots(except){
+  const out = [];
+  for(const q of S.items){ if(!isPerson(q) || q===except) continue; out.push({x:q.x, y:q.y, q});
+    (q.path || []).forEach((w, i, a) => { if(i===a.length - 1 || (w.acts && w.acts.length)) out.push({x:w.x, y:w.y, q}); }); }
+  return out;
+}
+const isStandWp = (it, i) => !!(it.path && (i===it.path.length - 1 || (it.path[i].acts && it.path[i].acts.length)));
+function segsCross(ax,ay,bx,by,cx,cy,dx,dy){
+  const d1 = (bx-ax)*(cy-ay) - (by-ay)*(cx-ax), d2 = (bx-ax)*(dy-ay) - (by-ay)*(dx-ax), d3 = (dx-cx)*(ay-cy) - (dy-cy)*(ax-cx), d4 = (dx-cx)*(by-cy) - (dy-cy)*(bx-cx);
+  return d1*d2 < 0 && d3*d4 < 0;
+}
+function wallClear(ax, ay, bx, by){
+  for(const [k, e] of S.edges){ if(e.t!=='w') continue; const [d, x, y] = parseKey(k), w = edgePts(d, x, y);
+    if(distSeg(bx, by, w[0], w[1], w[2], w[3]) < 0.2 || segsCross(ax, ay, bx, by, w[0], w[1], w[2], w[3])) return false; }
+  return true;
+}
+// the nearest spot to (x,y) that keeps SPACE from everyone else standing still
+function repel(it, x, y){
+  const spots = standSpots(it); repelHit = null;
+  const clash = (px, py) => spots.find(s => Math.hypot(px - s.x, py - s.y) < SPACE - 1e-3);
+  let c = clash(x, y); if(!c) return {x, y};
+  repelHit = c.q;
+  // try pushing straight off him first, then round in steps, a little further each ring, keeping clear of walls
+  const base = Math.atan2(y - c.y, x - c.x) || 0;
+  for(let ring = 0; ring < 6; ring++){
+    let best = null;
+    for(let k = 0; k < 16; k++){ const ang = base + (k % 2 ? 1 : -1)*Math.ceil(k/2)*Math.PI/8;
+      const ref = ring===0 ? c : {x, y}, rr = ring===0 ? SPACE + 0.01 : SPACE*(0.5 + ring*0.35);
+      const px = snap(ref.x + Math.cos(ang)*rr, 1/12), py = snap(ref.y + Math.sin(ang)*rr, 1/12);
+      if(clash(px, py) || !wallClear(x, y, px, py)) continue;
+      const d = Math.hypot(px - x, py - y); if(!best || d < best.d - 1e-6) best = {x:px, y:py, d}; }
+    if(best) return {x:best.x, y:best.y};
+  }
+  return {x, y};
+}
+function repelNote(){ if(repelHit) toast(`Kept about 1⅓ ft from ${tagOf(repelHit)} so nobody stands on anybody`); repelHit = null; }
+
 // drag handlers shared by Move and Path tools
 function dragOps(h, sx, sy){
   const lazy = fn => { let started = false; return (x,y) => { if(!started){ if(Math.hypot(x-sx,y-sy)<4) return; checkpoint(); started = true; } fn(toWorld(x,y)); changed(); }; };
   if(h.kind==='wp'){ const w = h.it.path[h.i]; select({type:'wp', id:h.it.id, i:h.i});
-    return {move:lazy(p => { w.x = snap(p.x,1/6); w.y = snap(p.y,1/6); }), up(){ renderInspector(); }}; }
+    return {move:lazy(p => { let nx = snap(p.x,1/6), ny = snap(p.y,1/6); if(isStandWp(h.it, h.i)){ const r = repel(h.it, nx, ny); nx = r.x; ny = r.y; } w.x = nx; w.y = ny; }), up(){ repelNote(); renderInspector(); }}; }
   if(h.kind==='look' || h.kind==='lookNew'){ const w = h.it.path[h.i]; if(!(sel && sel.type==='wp' && sel.id===h.it.id && sel.i===h.i)) select({type:'wp', id:h.it.id, i:h.i});
     return {move:lazy(p => { w.lx = snap(p.x,1/6); w.ly = snap(p.y,1/6); }), up(){ renderInspector(); }}; }
   if(h.kind==='wloc'){ const a = h.act, who = getItem(a.who); select(h.owner<0 ? {type:'item', id:h.it.id} : {type:'wp', id:h.it.id, i:h.owner});
     return {move:lazy(p => { const nr = who && nearestRoute(p.x, p.y, 99, who); if(nr){ a.seg = nr.seg; a.f = r2(nr.f); } }), up(){ renderInspector(); }}; }
   if(h.kind==='alook'){ const a = h.act; select(h.owner<0 ? {type:'item', id:h.it.id} : {type:'wp', id:h.it.id, i:h.owner});
     return {move:lazy(p => { a.x = snap(p.x,1/6); a.y = snap(p.y,1/6); }), up(){ renderInspector(); }}; }
-  if(h.kind==='start'){ const it = h.it; select({type:'item', id:it.id}); return {move:lazy(p => { it.x = snap(p.x,1/6); it.y = snap(p.y,1/6); })}; }
+  if(h.kind==='start'){ const it = h.it; select({type:'item', id:it.id}); return {move:lazy(p => { const r = repel(it, snap(p.x,1/6), snap(p.y,1/6)); it.x = r.x; it.y = r.y; }), up(){ repelNote(); }}; }
   if(h.kind==='step'){ const st = h.st; select({type:'step', id:st.id});
     return {move:lazy(p => { if(st.who){ const nr = nearestRoute(p.x, p.y, 99, getItem(st.who)); if(nr){ st.seg = nr.seg; st.f = r2(nr.f); } }
       else { st.x = snap(p.x,1/6); st.y = snap(p.y,1/6); } }), up(){ renderInspector(); }}; }
@@ -1775,7 +1818,8 @@ function startTool(sx,sy){
         if(isPerson(it) && TIME>0.001) return null;   // mid-playback: the dashed start ring moves the start point
         const offx=p.x-it.x, offy=p.y-it.y; let moved=false;
         return {move(x,y){ if(!moved){ if(Math.hypot(x-sx,y-sy)<5) return; checkpoint(); moved=true; }
-          const w=toWorld(x,y); it.x=clamp(snap(w.x-offx,1/6),-2,S.cols+2); it.y=clamp(snap(w.y-offy,1/6),-2,S.rows+2); changed(); }}; }
+          const w=toWorld(x,y); let nx=clamp(snap(w.x-offx,1/6),-2,S.cols+2), ny=clamp(snap(w.y-offy,1/6),-2,S.rows+2);
+          if(isPerson(it)){ const r = repel(it, nx, ny); nx = r.x; ny = r.y; } it.x=nx; it.y=ny; changed(); }, up(){ if(moved) repelNote(); }}; }
       if(h.kind==='arrowEnd'){ const a=h.a; let first=true; return {move(x,y){ if(first){checkpoint(); first=false;} const w=toWorld(x,y); if(h.end){a.x2=snap(w.x,1/6);a.y2=snap(w.y,1/6);} else {a.x1=snap(w.x,1/6);a.y1=snap(w.y,1/6);} changed(); }}; }
       if(h.kind==='arrow'){ const a=h.a; select({type:'arrow',id:a.id}); const o={x1:a.x1,y1:a.y1,x2:a.x2,y2:a.y2}; let moved=false;
         return {move(x,y){ if(!moved){ if(Math.hypot(x-sx,y-sy)<5) return; checkpoint(); moved=true; } const w=toWorld(x,y), dx=snap(w.x-p.x,1/6), dy=snap(w.y-p.y,1/6); a.x1=o.x1+dx;a.y1=o.y1+dy;a.x2=o.x2+dx;a.y2=o.y2+dy; changed(); }}; }
@@ -1803,6 +1847,7 @@ function startTool(sx,sy){
           if(!add.length){ drawPlan(); return; }
           checkpoint(); if(!it.path) it.path = [];
           for(const q of add) it.path.push({x:q.x, y:q.y, sp:sp0, w:0, go:'', g:null});
+          { const e = it.path[it.path.length-1], r = repel(it, e.x, e.y); e.x = r.x; e.y = r.y; repelNote(); }
           sel = {type:'wp', id:it.id, i:it.path.length-1}; changed(); renderInspector(); },
         cancel(){ preview = null; drawPlan(); }};
     }
@@ -1857,8 +1902,9 @@ function startTool(sx,sy){
         checkpoint();
         const k = tool==='object' ? furnKind : tool;
         const it = {id:newId(), k, x:snap(w.x,1/6), y:snap(w.y,1/6), r:0, l:'', p:0};
-        if(isPerson(it)) it.g = 0;
+        if(isPerson(it)){ it.g = 0; const r = repel(it, it.x, it.y); it.x = r.x; it.y = r.y; }
         if(k==='f'){ it.l = String(S.items.filter(i=>i.k==='f').length+1); }
+        if(isPerson(it)) repelNote();
         if(k==='label'){ it.l = 'Room'; }
         S.items.push(it); sel = {type:'item', id:it.id}; changed(); renderInspector();
         if(k==='label'){ const inp=$('#insp-label'); if(inp){ inp.focus(); inp.select(); } } }};
@@ -4043,18 +4089,37 @@ function buildZipper(){
   const STACK = 1.35/FT, spotOf = m => m.i >= 0 ? m.q.path[m.i] : {x:m.q.x, y:m.q.y}, uOf = pt => o.h ? pt.x : pt.y, latOf = pt => (uOf(pt) < F.mid ? -1 : 1);
   const doorLook = F.P(F.mid, o.line - side*0.6);
   const lead = {}, count = {}, placed = []; let lastClosed = null;
+  const vOfP = pt => o.h ? pt.y : pt.x;
+  // the line runs the way the stack already runs: from the lead man back through the men behind him (along the wall,
+  // straight back down a hallway, or on a slant). Only when they're bunched up on top of him does it default to the wall.
+  const axisOf = {};
+  plan.forEach(pl => { const c = spotOf(pl.m), lat = latOf(c); (axisOf[lat] = axisOf[lat] || []).push(c); });
+  Object.keys(axisOf).forEach(lat => { const pts = axisOf[lat], L = pts[0]; let du = 0, dv = 0;
+    // lead man beside the door, against the wall: the classic stack, so the line runs along the wall away from the door
+    if((uOf(L) < o.a0 || uOf(L) > o.a1) && Math.abs(vOfP(L) - o.line) < 0.9){ axisOf[lat] = {u:+lat, v:0}; return; }
+    pts.slice(1).forEach(p => { du += uOf(p) - uOf(L); dv += vOfP(p) - vOfP(L); });
+    if((dv - 0)*side < 0) dv = 0;   // never line up toward the room
+    const len = Math.hypot(du, dv); axisOf[lat] = len > 0.25 ? {u:du/len, v:dv/len} : {u:+lat, v:0}; });
   plan.forEach((pl, k) => {
     const q = pl.m.q; if(q.path) q.path = q.path.slice(0, pl.m.i + 1);
     const cur = spotOf(pl.m), lat = latOf(cur);
     if(!zip.tighten){ return; }
-    if(!lead[lat]){ lead[lat] = {u:uOf(cur), v:o.h ? cur.y : cur.x}; count[lat] = 0; placed.push(cur); return; }
-    const n = ++count[lat], L = lead[lat], spot = F.P(L.u + lat*n*STACK, L.v);
-    if(Math.hypot(spot.x - cur.x, spot.y - cur.y) < 0.08){ placed.push(spot); return; }
-    // if getting to his place means passing a teammate, he sidesteps off the wall, passes, and steps back in line
-    const near = placed.some(s => distSeg(s.x, s.y, cur.x, cur.y, spot.x, spot.y) < 1.25/FT);
+    if(!lead[lat]){ lead[lat] = {u:uOf(cur), v:vOfP(cur)}; count[lat] = 0; placed.push(cur); return; }
+    const n = ++count[lat], L = lead[lat], ax = axisOf[lat], spot = F.P(L.u + ax.u*n*STACK, L.v + ax.v*n*STACK);
+    // already about in his place: leave him be (no shuffling for an inch)
+    if(Math.hypot(spot.x - cur.x, spot.y - cur.y) < 0.4/FT){ placed.push(cur); return; }
+    // if getting to his place means passing a teammate, he steps out to the side away from the wall, passes, and steps back in line
+    // (passing = the teammate stands between where he is and his place, counted along the line, and close to his way there)
+    const along = pt => (uOf(pt) - L.u)*ax.u + (vOfP(pt) - L.v)*ax.v, a0 = along(cur), a1 = along(spot);
+    const near = placed.some(s => { const as = along(s); return as > Math.min(a0, a1) + 0.05 && as < Math.max(a0, a1) - 0.05 && distSeg(s.x, s.y, cur.x, cur.y, spot.x, spot.y) < 1.25/FT; });
     const steps = [];
-    if(near){ const vOff = L.v + side*0.5; steps.push(F.P(uOf(cur), vOff), F.P(uOf(spot), vOff)); }
+    if(near){ let pu = -ax.v, pv = ax.u; if(pv*side < 0 || (Math.abs(pv) < 0.2 && pu*lat < 0)){ pu = -pu; pv = -pv; }
+      const off = 0.5; steps.push(F.P(uOf(cur) + pu*off, vOfP(cur) + pv*off), F.P(uOf(spot) + pu*off, vOfP(spot) + pv*off)); }
     steps.push(spot);
+    // he lines up as soon as he gets to the stack: anything that held him at his old spot (move with, wait for the door,
+    // a gate, a signal...) would make him shuffle into line just as #1 goes in. His place in the entry order times him now.
+    const own = pl.m.i >= 0 ? q.path[pl.m.i] : q;
+    if(own.acts) own.acts = own.acts.filter(a => !['mwith','wloc','wait','gate','wdoor','wsig','wbang'].includes(a.k));
     if(!q.path) q.path = [];
     q.path.splice(pl.m.i + 1, 0, ...steps.map(s => ({x:r2(s.x), y:r2(s.y), sp:4, w:0, go:'', g:null, lx:r2(doorLook.x), ly:r2(doorLook.y)})));
     pl.m.i += steps.length; lastClosed = {q, leg:pl.m.i}; placed.push(spot);
@@ -4119,6 +4184,11 @@ function buildZipper(){
         for(let j=0;j<k;j++){ const o2 = poseAt(order[j], t); if(atDoor(o2) && Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
       if(!tooClose) break;
       a.d = r2(a.d + 0.05); changed(); } }
+  // rifles in the fight: whatever he carried in the stack, each man brings his rifle up on target as he steps off for the door
+  // (after anything that holds him there), not at high ready
+  plan.forEach(pl => { const q = pl.m.q, own = pl.m.i >= 0 ? q.path[pl.m.i] : q;
+    own.acts = (own.acts || []).filter((a, i, l) => !(a.k==='gun' && (a.zipGun || (a.g===2 && i===l.length - 1)))); own.acts.push({k:'gun', g:2, zipGun:1}); });
+  changed();
   try{ localStorage.setItem('cqb-zip', JSON.stringify({pattern:zip.pattern, first:zip.first, tempo:zip.tempo, gap:zip.gap, sectors:zip.sectors, tighten:zip.tighten})); }catch(e){}
   $('#zipper').hidden = true; sel = {type:'item', id:it.id}; changed(); renderInspector(); setTime(0);
   toast(`${ZIP_PATTERNS[zip.pattern]==='Pick sides' ? 'Team entry' : ZIP_PATTERNS[zip.pattern]} built for ${men.length} men · press play. Undo puts their old moves back`);
