@@ -854,7 +854,7 @@ function syncAnchoredSteps(){
     if(!it || !pts[st.seg+1]){ delete st.who; delete st.seg; delete st.f; st.lost = 1; continue; }
     const a = pts[st.seg], b = pts[st.seg+1]; st.x = a.x + (b.x-a.x)*st.f; st.y = a.y + (b.y-a.y)*st.f;
     const sc = sched().map.get(it.id), ph = sc && sc.ph.find(q => q.k==='m' && q.leg===st.seg);
-    const t = ph ? ph.t0 + (ph.t1-ph.t0)*st.f : sc && sc.arr[st.seg]!=null ? sc.arr[st.seg] : null;
+    const t = ph ? legTime(ph, st.f) : sc && sc.arr[st.seg]!=null ? sc.arr[st.seg] : null;
     st.never = t==null; st.t = t==null ? 1e6 : t; }
   if(any) S.steps.sort((a,b) => a.t-b.t);
 }
@@ -917,6 +917,8 @@ const doorCenter = (k) => { if(!k) return null; const [d,x,y] = parseKey(k); ret
 const DOOR_T = {hand:{busy:1.2, half:1.2}, kick:{busy:0.7, half:0.55}};
 // how long a turn takes at a natural turning speed
 const TURN_RATE = 300;
+const ACC_T = 0.4;      // seconds to get up to speed from a stop, and to slow into one
+const CORNER_R = 0.32;  // corners he walks through without stopping are rounded off over this much (grid squares, about 1 ft)
 const SWEEP = {half:22.5, per:1.0};   // sweep: ±22.5° (a 45° cone), one back-and-forth per second   // degrees per second
 const turnTime = (a, b) => Math.abs(angDiff(a, b)) / TURN_RATE;
 function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bangs, bangsPrev){
@@ -947,7 +949,7 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
         const m = prev && prev.get(a.who), who = S.items.find(i => i.id===a.who), nm = who ? tagOf(who) : 'his teammate';
         if(!a.set){ stuck = `you to pick the spot on ${nm}’s route`; return false; }
         if(!m){ stuck = `${nm} to reach his spot`; return false; }
-        const mv = m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? mv.t0 + (mv.t1-mv.t0)*a.f : m.arr[a.seg];
+        const mv = m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? legTime(mv, a.f) : m.arr[a.seg];
         if(tt==null){ stuck = `${nm} to reach his spot, but he never gets there`; return false; }
         hold(tt + (a.d||0) - t); }
       else if(a.k==='mwith'){   // moves off when the man he's stacked on moves off (plus a short lag)
@@ -980,7 +982,28 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
     ok = run(w.acts);
   });
   ph.push({k:'e', t0:t, t1:Infinity, x, y, r0:r, look:null, g});
+  // movement shape: he speeds up out of a stop and slows into one; legs he walks straight through carry on at speed
+  let dacc = 0;
+  for(let i=0;i<ph.length;i++){ const q = ph[i], pr = ph[i-1], nx = ph[i+1]; q.d0 = dacc; if(q.k!=='m') continue;
+    q.len = Math.hypot(q.bx-q.ax, q.by-q.ay)*FT; dacc += q.len;
+    q.cin = !!(pr && pr.k==='m' && Math.abs(pr.t1 - q.t0) < 1e-6); q.cout = !!(nx && nx.k==='m' && Math.abs(nx.t0 - q.t1) < 1e-6);
+    const T = Math.max(1e-6, q.t1 - q.t0); q.ta = q.cin ? 0 : Math.min(ACC_T, T*0.45); q.tb = q.cout ? 0 : Math.min(ACC_T, T*0.45);
+    q.vmax = 1/(T - q.ta/2 - q.tb/2); }
   return {ph, arr, sigs, fired, end:t, stuck};
+}
+// how far along a leg he is at time t (0–1) and his speed then (fraction of the leg per second)
+function legFrac(q, t){
+  const T = Math.max(1e-6, q.t1 - q.t0), u = clamp(t - q.t0, 0, T), ta = q.ta||0, tb = q.tb||0, vm = q.vmax || 1/T;
+  if(ta > 0 && u < ta) return {s:vm*u*u/(2*ta), v:vm*u/ta};
+  if(tb > 0 && u > T - tb){ const w = T - u; return {s:1 - vm*w*w/(2*tb), v:vm*w/tb}; }
+  return {s:vm*(ta/2 + (u - ta)), v:vm};
+}
+// the moment he reaches a fraction f of a leg (the inverse of legFrac)
+function legTime(q, f){
+  const T = Math.max(1e-6, q.t1 - q.t0), ta = q.ta||0, tb = q.tb||0, vm = q.vmax || 1/T, sa = vm*ta/2, sb = 1 - vm*tb/2;
+  if(ta > 0 && f < sa) return q.t0 + Math.sqrt(2*ta*f/vm);
+  if(tb > 0 && f > sb) return q.t0 + T - Math.sqrt(Math.max(0, 2*tb*(1-f)/vm));
+  return q.t0 + ta + (f - sa)/vm;
 }
 function buildSched(s){
   const people = s.items.filter(isPerson); let rel = {}, gates = {}, map = new Map(), doorEv = [], recv = {}, doorT = {}, prev = null, prevMoves = {}, bangs = [], bangsPrev = [];
@@ -1023,14 +1046,26 @@ function poseAt(it, t){
 function rawPoseAt(it, t){
   const sc = sched().map.get(it.id);
   if(!sc) return {x:it.x, y:it.y, r:it.r||0, g:it.g||0};
-  const ph = sc.ph; let p = ph[ph.length-1];
-  for(const q of ph){ if(t < q.t1){ p = q; break; } }
+  const ph = sc.ph; let pi = ph.length-1;
+  for(let i=0;i<ph.length;i++){ if(t < ph[i].t1){ pi = i; break; } }
+  const p = ph[pi];
   let sig = null; for(const s of sc.sigs) if(t >= s.t0 && t < s.t1) sig = s;
-  if(p.k==='m'){ const f = clamp((t-p.t0)/Math.max(1e-6, p.t1-p.t0), 0, 1), x = p.ax+(p.bx-p.ax)*f, y = p.ay+(p.by-p.ay)*f;
-    return {x, y, r:p.look ? angTo(x,y,p.look) : p.tr, g:p.g, sig, moving:true}; }
+  if(p.k==='m'){
+    const {s, v} = legFrac(p, t), L = p.len/FT;
+    let x = p.ax+(p.bx-p.ax)*s, y = p.ay+(p.by-p.ay)*s, dir = p.tr;
+    // corners he walks straight through are rounded off: a short curve from just before the waypoint to just after it
+    const curve = (A, P1, Bq, c, cA, cB, u) => {
+      const ua = Math.hypot(P1.x-A.x, P1.y-A.y)||1, ub = Math.hypot(Bq.x-P1.x, Bq.y-P1.y)||1;
+      const Q0 = {x:P1.x-(P1.x-A.x)/ua*c, y:P1.y-(P1.y-A.y)/ua*c}, Q1 = {x:P1.x+(Bq.x-P1.x)/ub*c, y:P1.y+(Bq.y-P1.y)/ub*c}, w = 1-u;
+      return {x:w*w*Q0.x + 2*u*w*P1.x + u*u*Q1.x, y:w*w*Q0.y + 2*u*w*P1.y + u*u*Q1.y,
+        r:deg(Math.atan2(2*w*(P1.y-Q0.y) + 2*u*(Q1.y-P1.y), 2*w*(P1.x-Q0.x) + 2*u*(Q1.x-P1.x)))}; };
+    const nx = ph[pi+1], pr = ph[pi-1], d = s*L;
+    if(p.cout && nx){ const c = Math.min(CORNER_R, 0.4*L, 0.4*nx.len/FT); if(c > 0.02 && d > L - c){ const k = curve({x:p.ax,y:p.ay}, {x:p.bx,y:p.by}, {x:nx.bx,y:nx.by}, c, 0, 0, (d - (L - c))/(2*c)); x = k.x; y = k.y; dir = k.r; } }
+    if(p.cin && pr){ const c = Math.min(CORNER_R, 0.4*L, 0.4*pr.len/FT); if(c > 0.02 && d < c){ const k = curve({x:pr.ax,y:pr.ay}, {x:p.ax,y:p.ay}, {x:p.bx,y:p.by}, c, 0, 0, 0.5 + d/(2*c)); x = k.x; y = k.y; dir = k.r; } }
+    return {x, y, r:p.look ? angTo(x,y,p.look) : (dir+360)%360, g:p.g, sig, moving:true, dist:p.d0 + s*p.len, v:v*p.len}; }
   let r = p.look ? angTo(p.x,p.y,p.look) : p.r0;
   if(p.sweep) r = (r + SWEEP.half*Math.sin(2*Math.PI*(t - p.sweep.t0)/SWEEP.per) + 360) % 360;
-  return {x:p.x, y:p.y, r, g:p.g, sig};
+  return {x:p.x, y:p.y, r, g:p.g, sig, dist:p.d0||0, v:0};
 }
 function dur(){ let d = sched().end; for(const s of S.steps) if(s.t < 1e5) d = Math.max(d, s.t+1.5); return d; }
 const tlMax = () => Math.max(10, Math.ceil(dur()) + 4);
@@ -1921,7 +1956,7 @@ function actsEditor(it, owner, oi){
         <button class="btn sm ${dArm?'on':''}" data-act="a-door" data-ai="${ai}">${dArm ? 'Tap a door…' : ok ? 'Change door' : 'Pick the door'}</button>
         <span class="small">${ok ? 'holds until that door ' + (a.at==='start' ? 'starts to open' : 'is half open') : 'No door picked yet.'}</span>`; }
     else if(a.k==='wloc'){ const w = a.who && getItem(a.who), rArm = lookArm && lookArm.route && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
-      const m = w && sched().map.get(w.id), mv = m && a.set && m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? mv.t0 + (mv.t1-mv.t0)*a.f : (m && a.set ? m.arr[a.seg] : null);
+      const m = w && sched().map.get(w.id), mv = m && a.set && m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? legTime(mv, a.f) : (m && a.set ? m.arr[a.seg] : null);
       body = `<select data-af="who" data-ai="${ai}" id="af-wl-${ai}" aria-label="Whose route">${others.filter(q => q.path && q.path.length).map(q => `<option value="${q.id}" ${a.who===q.id?'selected':''}>${esc(tagOf(q))}</option>`).join('') || '<option value="">nobody has a route</option>'}</select>
         <button class="btn sm ${rArm?'on':''}" data-act="a-route" data-ai="${ai}">${rArm ? 'Tap his route…' : a.set ? 'Move the spot' : 'Pick the spot'}</button>
         ${stepA('a-off', ai, a.d||0, 's')}<span class="small">${!a.set ? 'Tap the spot on his route.' : tt==null ? 'He never reaches it.' : `he hits it at ${tt.toFixed(1)} s · go ${(a.d||0)===0 ? 'right then' : (a.d<0 ? Math.abs(a.d).toFixed(1)+' s before' : a.d.toFixed(1)+' s after')}`}</span>`; }
@@ -1983,6 +2018,7 @@ function renderInspector(){
       ${stuckNote(it)}
       ${actsEditor(it, it, -1)}
       <div class="insp-row"><span class="lbl">Route</span><div class="row"><button class="btn ${tool==='path'?'on':''}" data-act="draw">${n?'Add to route':'Draw route'}</button>${n?'<button class="btn" data-act="wpfirst">Edit waypoints</button><button class="btn" data-act="rclear">Clear route</button>':''}</div></div>
+      <div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From the end of his route: pivots tight around the door frame on his side and digs his near corner. No sweep until you add one.</span></div>
       <div class="insp-actions"><button class="btn ${on?'on':''}" data-act="los">${on?'Hide':'Show'} what they see</button><button class="btn" data-act="eyes">Ride along</button><button class="btn danger" data-act="del">Delete</button></div>`;
     } else if(it.k==='label'){
       h = `<div class="insp-head">Label</div>
@@ -2006,6 +2042,7 @@ function renderInspector(){
     <div class="insp-row"><span class="lbl">Speed</span>${seg('sp', spOpts, spCur, 'sm')}</div>
     <div class="insp-row"><span class="lbl">Facing</span>${seg('facing', [['travel','Where he’s walking'],['point','Watch a point']], w.lx!=null ? 'point' : 'travel', 'sm')}<span class="small">${w.lx!=null ? 'Drag the eye to aim it. He turns to it on the way here and keeps watching it.' : 'Or drag the eye next to the waypoint.'}</span></div>
     ${actsEditor(it, w, sel.i)}
+    ${sel.i===n-1 ? `<div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From the end of his route: pivots tight around the door frame on his side and digs his near corner. No sweep until you add one.</span></div>` : ''}
     <div class="insp-actions"><button class="btn" data-act="wprev" aria-label="Previous waypoint">◀</button><button class="btn" data-act="wnext" aria-label="Next waypoint">▶</button><button class="btn" data-act="wjump">Jump to ${at} s</button><button class="btn" data-act="wperson">Person</button><button class="btn danger" data-act="del">Delete waypoint</button></div>`;
   } else if(sel.type==='step'){
     const st = getStep(sel.id); if(!st){ sel=null; insp.hidden=true; return; }
@@ -2049,6 +2086,8 @@ insp.addEventListener('click', e => {
   if(act==='ro-go'){ const st = getStep(sel.id); if(st){ pause(); setTime(st.t); renderInspector(); } return; }
   if(READONLY) return;
   if(act.startsWith('a-')){ actClick(act, v, +b.dataset.ai); return; }
+  if(act==='bhug'){ bhHug = v; try{ localStorage.setItem('cqb-bh-hug', v); }catch(err){} renderInspector(); return; }
+  if(act==='bhook'){ const who = getItem(sel.id); if(who && (sel.type==='item' || sel.type==='wp')) buttonHook(who); return; }
   if(sel.type==='item'){
     const it = getItem(sel.id); if(!it) return;
     if(act==='los'){ losId = losId===it.id ? null : it.id; drawPlan(); renderInspector(); if(T) T.dirty=true; return; }
@@ -2328,12 +2367,13 @@ function figureKit(){
     mat:{ uni:std('#77735a'), pants:std('#6c6852'), vest:std('#4e553f'), pouch:std('#454b38'), helm:std('#5a5944', 0.7), boot:std('#3a3127', 0.9), glove:std('#2c2c29'),
       gun:std('#1f2121', 0.45, 0.35), gunTan:std('#8a7a5c', 0.6, 0.1), optic:std('#151616', 0.3, 0.5), lens:std('#2f4f6b', 0.1, 0.8),
       hJacket:std('#5a2f2a'), hPants:std('#2e3440'), beanie:std('#1d1d1f'), shoe:std('#222225'), hair:std('#2a1d15'), jeans:std('#3d4a63') },
-    geo:{ thigh:new THREE.CylinderGeometry(0.24, 0.19, 1.45, 10).translate(0,-0.725,0), shin:new THREE.CylinderGeometry(0.18, 0.14, 1.4, 10).translate(0,-0.7,0),
-      boot:new THREE.BoxGeometry(0.62, 0.3, 0.32), pelvis:new THREE.BoxGeometry(0.55, 0.5, 0.95),
-      torso:new THREE.CylinderGeometry(0.5, 0.42, 1.5, 12), plate:new THREE.BoxGeometry(0.16, 1.05, 0.9), pouch:new THREE.BoxGeometry(0.16, 0.3, 0.22), pack:new THREE.BoxGeometry(0.3, 0.9, 0.62),
+    geo:{ thigh:new THREE.CylinderGeometry(0.29, 0.21, 1.45, 16).translate(0,-0.725,0), shin:new THREE.CylinderGeometry(0.2, 0.15, 1.4, 16).translate(0,-0.7,0),
+      boot:new THREE.SphereGeometry(1, 18, 12), sole:new THREE.CylinderGeometry(1, 1, 1, 18), pelvis:new THREE.SphereGeometry(1, 18, 14),
+      joint:new THREE.SphereGeometry(1, 16, 12),
+      torso:new THREE.LatheGeometry([[0.001,-0.78],[0.36,-0.76],[0.42,-0.55],[0.44,-0.25],[0.48,0.1],[0.5,0.38],[0.47,0.58],[0.38,0.72],[0.2,0.8],[0.001,0.82]].map(([r,y]) => new THREE.Vector2(r,y)), 22), plate:new THREE.BoxGeometry(0.16, 1.05, 0.9), pouch:new THREE.BoxGeometry(0.16, 0.3, 0.22), pack:new THREE.BoxGeometry(0.3, 0.9, 0.62),
       neck:new THREE.CylinderGeometry(0.15, 0.17, 0.3, 8), head:new THREE.SphereGeometry(0.36, 16, 12), helm:new THREE.SphereGeometry(0.44, 16, 10, 0, Math.PI*2, 0, Math.PI*0.55),
       band:new THREE.CylinderGeometry(0.445, 0.445, 0.08, 16, 1, true), nvg:new THREE.BoxGeometry(0.14, 0.12, 0.2), ear:new THREE.CylinderGeometry(0.13, 0.13, 0.12, 12),
-      cap:new THREE.SphereGeometry(0.38, 14, 8, 0, Math.PI*2, 0, Math.PI*0.5), limb:new THREE.CylinderGeometry(1, 1, 1, 8), hand:new THREE.SphereGeometry(0.1, 8, 6),
+      cap:new THREE.SphereGeometry(0.38, 14, 8, 0, Math.PI*2, 0, Math.PI*0.5), limb:new THREE.CylinderGeometry(1, 1, 1, 14), hand:new THREE.SphereGeometry(0.1, 12, 10),
       stock:new THREE.BoxGeometry(0.45, 0.2, 0.12), receiver:new THREE.BoxGeometry(0.75, 0.22, 0.13), rail:new THREE.CylinderGeometry(0.075, 0.075, 0.75, 10).rotateZ(Math.PI/2),
       barrel:new THREE.CylinderGeometry(0.035, 0.035, 0.45, 8).rotateZ(Math.PI/2), muzzle:new THREE.CylinderGeometry(0.05, 0.05, 0.12, 8).rotateZ(Math.PI/2),
       mag:new THREE.BoxGeometry(0.13, 0.42, 0.09), grip:new THREE.BoxGeometry(0.1, 0.26, 0.09), optic:new THREE.CylinderGeometry(0.055, 0.055, 0.3, 12).rotateZ(Math.PI/2),
@@ -2352,12 +2392,17 @@ function buildFigure(kit, it, idx, col){
   const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
   const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); parent.add(m); return m; };
   // legs: hip → knee → foot
+  const ball = (parent, mat, x, y, z, r) => { const m = add(parent, G.joint, mat, x, y, z); m.scale.set(r, r, r); return m; };
   const leg = side => { const hip = new THREE.Group(); hip.position.set(0, 3.0, side*0.25); body.add(hip);
-    add(hip, G.thigh, legs, 0, 0, 0); const knee = new THREE.Group(); knee.position.set(0, -1.45, 0); hip.add(knee);
-    add(knee, G.shin, legs, 0, 0, 0); add(knee, G.boot, feet, 0.12, -1.42, 0); return {hip, knee}; };
+    ball(hip, legs, 0, 0, 0, 0.29); add(hip, G.thigh, legs, 0, 0, 0); const knee = new THREE.Group(); knee.position.set(0, -1.45, 0); hip.add(knee);
+    ball(knee, legs, 0, 0, 0, 0.215); add(knee, G.shin, legs, 0, 0, 0); ball(knee, legs, 0, -1.36, 0, 0.155);
+    const foot = new THREE.Group(); foot.position.set(0, -1.4, 0); knee.add(foot);
+    add(foot, G.boot, feet, 0.13, -0.05, 0).scale.set(0.34, 0.15, 0.165); add(foot, G.sole, feet, 0.12, -0.14, 0).scale.set(0.2, 0.06, 0.17);
+    return {hip, knee, foot}; };
   const L = leg(-1), R = leg(1);
-  add(body, G.pelvis, legs, 0, 3.05, 0);
-  const torso = add(body, G.torso, top, 0, 3.95, 0); torso.scale.set(0.7, 1, 1.1);
+  add(body, G.pelvis, legs, 0, 3.12, 0).scale.set(0.34, 0.36, 0.52);
+  const torso = add(body, G.torso, top, 0, 3.95, 0); torso.scale.set(0.72, 1, 1.12);
+  for(const z of [-0.47, 0.47]) ball(body, top, 0, 4.6, z, 0.175);
   if(f){ add(body, G.plate, M.vest, 0.3, 4.05, 0); add(body, G.plate, M.vest, -0.3, 4.05, 0).scale.set(1, 1, 1);
     for(const z of [-0.26, 0, 0.26]) add(body, G.pouch, M.pouch, 0.43, 3.72, z);
     add(body, G.pack, M.pouch, -0.48, 4.05, 0); }
@@ -2383,28 +2428,36 @@ function buildFigure(kit, it, idx, col){
     const gripPt = [0.3, -0.18, 0], handguard = [1.25, -0.06, 0];
     const sR = P(...shoulderR), sL = P(...shoulderL), eR = [ -0.18, -0.55, 0.42 ], eL = [0.55, -0.48, -0.48];
     pivot.add(limb(kit, sR, eR, 0.14, top)); pivot.add(limb(kit, eR, gripPt, 0.12, top)); add(pivot, G.hand, f ? M.glove : skin, ...gripPt);
-    armL = {up:new THREE.Mesh(G.limb, top), fore:new THREE.Mesh(G.limb, top), hand:new THREE.Mesh(G.hand, f ? M.glove : skin), hg:new THREE.Vector3(...handguard)};
-    body.add(armL.up, armL.fore, armL.hand); void sL; void eL;
+    ball(pivot, top, ...sR, 0.16); ball(pivot, top, ...eR, 0.135);
+    armL = {up:new THREE.Mesh(G.limb, top), fore:new THREE.Mesh(G.limb, top), hand:new THREE.Mesh(G.hand, f ? M.glove : skin), elbow:new THREE.Mesh(G.joint, top), hg:new THREE.Vector3(...handguard)};
+    armL.elbow.scale.set(0.135, 0.135, 0.135);
+    body.add(armL.up, armL.fore, armL.hand, armL.elbow); void sL; void eL;
   } else {
     for(const [s, z] of [[shoulderR, 0.55], [shoulderL, -0.55]]){ const el = [0.05, 3.85, z], hd = [0.12, 3.15, z*0.95];
-      body.add(limb(kit, s, el, 0.13, top)); body.add(limb(kit, el, hd, 0.11, skin)); add(body, G.hand, skin, ...hd); }
+      body.add(limb(kit, s, el, 0.13, top)); body.add(limb(kit, el, hd, 0.11, skin)); add(body, G.hand, skin, ...hd); ball(body, top, ...el, 0.125); }
   }
   // affiliation ring at his feet
   const ring = new THREE.Mesh(G.ring, new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.9, side:THREE.DoubleSide, depthWrite:false}));
   ring.rotation.x = -Math.PI/2; ring.position.y = 0.05; g.add(ring);
   g.traverse(o => { if(o.isMesh && o!==ring){ o.castShadow = true; } });
-  return {g, body, head, pivot, L, R, armL};
+  return {g, body, head, pivot, L, R, armL, gait:{ph:0, amp:0}, lean:0};
 }
 // standing, walking stride, or kneeling on the right knee
-function poseFigure(p, moving, t){
+function poseFigure(p, ps, gstate){
   const kneel = !!p.it.p, B = p.body;
-  if(kneel){ B.position.y = -1.25; p.L.hip.rotation.z = 1.45; p.L.knee.rotation.z = -1.5; p.R.hip.rotation.z = -0.15; p.R.knee.rotation.z = -1.45; return; }
-  B.position.y = 0;
-  if(moving){ const ph = t*8.5, s = Math.sin(ph), c = Math.sin(ph + Math.PI);
-    p.L.hip.rotation.z = s*0.42; p.R.hip.rotation.z = c*0.42;
-    p.L.knee.rotation.z = -Math.max(0, -Math.cos(ph))*0.75; p.R.knee.rotation.z = -Math.max(0, Math.cos(ph))*0.75;
-    B.position.y = -Math.abs(Math.cos(ph))*0.06; }
-  else { p.L.hip.rotation.z = 0.06; p.R.hip.rotation.z = -0.06; p.L.knee.rotation.z = -0.08; p.R.knee.rotation.z = -0.08; }
+  if(kneel){ B.position.y = -1.25; p.L.hip.rotation.z = 1.45; p.L.knee.rotation.z = -1.5; p.R.hip.rotation.z = -0.15; p.R.knee.rotation.z = -1.45;
+    if(p.L.foot){ p.L.foot.rotation.z = 0.05; p.R.foot.rotation.z = 1.1; } p.gait = {ph:0, amp:0}; p.lean = 0; return; }
+  const aim = gstate===2 && p.it.k!=='c', sp = ps.v || 0, amp = clamp(sp/5, 0, 1.25), a1 = Math.min(1, amp);
+  const stride = aim ? 2.0 : 2.6, ph = (ps.dist||0)/stride*Math.PI;   // one step per stride length walked
+  const s = Math.sin(ph), c = Math.cos(ph);
+  const swing = (aim ? 0.33 : 0.44)*a1, crouch = aim ? 0.22 : 0.05;
+  p.L.hip.rotation.z = s*swing + crouch*0.6; p.R.hip.rotation.z = -s*swing + crouch*0.6;
+  // the knee folds as the leg swings through, and stays a little soft when aiming
+  p.L.knee.rotation.z = -(crouch + Math.max(0, -c)*0.8*a1); p.R.knee.rotation.z = -(crouch + Math.max(0, c)*0.8*a1);
+  // feet stay level with the floor
+  if(p.L.foot){ p.L.foot.rotation.z = -(p.L.hip.rotation.z + p.L.knee.rotation.z); p.R.foot.rotation.z = -(p.R.hip.rotation.z + p.R.knee.rotation.z); }
+  B.position.y = -crouch*0.55 - Math.abs(c)*(aim ? 0.035 : 0.07)*a1;
+  p.gait = {ph, amp:a1}; p.lean = -(aim ? 0.07 : 0.03) - 0.05*a1;
 }
 /* ---------------- action animation ----------------
    The support (left) arm is solved every frame with simple two-bone IK from the shoulder to a hand target:
@@ -2424,7 +2477,7 @@ function animateActions(p, ps, byId, now){
   // kicking leg
   if(sig && sig.s==='door' && sig.how==='kick'){ const f = clamp((TIME - sig.t0)/(sig.t1 - sig.t0), 0, 1); busy = true;
     let hip, knee; if(f < 0.35){ const u = easeIO(f/0.35); hip = 1.0*u; knee = -1.5*u; } else if(f < 0.55){ const u = easeIO((f-0.35)/0.2); hip = 1.0 + 0.45*u; knee = -1.5 + 1.5*u; } else { const u = easeIO((f-0.55)/0.45); hip = 1.45*(1-u); knee = 0; }
-    p.R.hip.rotation.z = hip; p.R.knee.rotation.z = knee; B.rotation.z = -0.12*Math.sin(Math.PI*f); } else B.rotation.z = 0;
+    p.R.hip.rotation.z = hip; p.R.knee.rotation.z = knee; B.rotation.z = -0.12*Math.sin(Math.PI*f); } else B.rotation.z = p.lean || 0;
   if(!p.armL) return busy;
   const A = p.armL; p.g.updateMatrixWorld(true);
   const shoulder = V3(0, 4.62, -0.48);
@@ -2458,7 +2511,7 @@ function animateActions(p, ps, byId, now){
   const handP = shoulder.clone().add(toH), dir = toH.clone().normalize(), mid = shoulder.clone().add(toH.clone().multiplyScalar(0.5));
   let bend = V3(-0.2, -1, -0.6); bend.sub(dir.clone().multiplyScalar(bend.dot(dir))); if(bend.lengthSq() < 1e-6) bend = V3(0,0,-1); bend.normalize();
   const hgt = Math.sqrt(Math.max(0, L1*L1 - (dd/2)*(dd/2))), elbow = mid.add(bend.multiplyScalar(hgt));
-  setLimb(A.up, shoulder, elbow, 0.14); setLimb(A.fore, elbow, handP, 0.12); A.hand.position.copy(handP);
+  setLimb(A.up, shoulder, elbow, 0.14); setLimb(A.fore, elbow, handP, 0.12); A.hand.position.copy(handP); if(A.elbow) A.elbow.position.copy(elbow);
   return busy;
 }
 function disposeTree(g){
@@ -2605,7 +2658,8 @@ function updateDyn(dt){
     const ps = poseAt(p.it, TIME);
     p.g.position.set(ps.x*FT, 0, ps.y*FT); p.g.rotation.y = -rad(ps.r||0);
     if(p.sp) p.sp.position.set(ps.x*FT, p.it.p?5.6:7.3, ps.y*FT);
-    poseFigure(p, !!ps.moving, TIME); if(ps.moving) busy = busy || playing;
+    { const fl0 = p.pivot ? flaggingWho(p.it, ps, TIME, q => poseAt(q, TIME)) : false, sg0 = sigGun(ps.sig); p.gstate = !p.pivot ? 2 : (sg0===1 || sg0===0) ? sg0 : fl0 ? 1 : sg0===3 ? 3 : ps.g; }
+    poseFigure(p, ps, p.gstate); if(ps.moving) busy = busy || playing;
     p.fan.visible = conesOn; if(T.routes) T.routes.visible = routesOn;
     const st = ps.sig ? (ps.sig.txt || SIGS[ps.sig.s] || 'Signal') + (ps.sig.to && getItem(ps.sig.to) ? ' → ' + tagOf(getItem(ps.sig.to)) : '') : '';
     if(st !== p.sigText){ if(p.sigSp){ T.root.remove(p.sigSp); p.sigSp.material.map.dispose(); p.sigSp.material.dispose(); p.sigSp = null; }
@@ -2613,12 +2667,13 @@ function updateDyn(dt){
     if(p.sigSp) p.sigSp.position.set(ps.x*FT, (p.it.p?5.6:7.3) + 1.3, ps.y*FT);
     if(ps.sig && ps.sig.s==='nod'){ p.head.rotation.z = -Math.abs(Math.sin(now*7))*0.45; busy = true; } else p.head.rotation.z = 0;
     if(p.pivot){
-      const fl = flaggingWho(p.it, ps, TIME, q => poseAt(q, TIME)), sg = sigGun(ps.sig), gstate = (sg===1 || sg===0) ? sg : fl ? 1 : sg===3 ? 3 : ps.g, target = GUN_PITCH[gstate];
+      const gstate = p.gstate, target = GUN_PITCH[gstate];
       if(p.pitch===null) p.pitch = target;
       const d = target - p.pitch; if(Math.abs(d) > 0.005){ p.pitch += d*Math.min(1, dt*10); busy = true; } else p.pitch = target;
-      p.pivot.rotation.z = p.pitch;
+      // a little rifle movement in time with his steps
+      const gw = p.gait || {ph:0, amp:0}; p.pivot.rotation.z = p.pitch + Math.sin(gw.ph*2)*0.018*gw.amp;
       if(gstate===3){ const w = now*9; p.pivot.rotation.y = Math.cos(w)*0.16; p.pivot.rotation.z = p.pitch + 0.06 + Math.sin(w)*0.16; busy = true; }   // lasso: the muzzle traces a circle
-      else p.pivot.rotation.y = 0;
+      else p.pivot.rotation.y = Math.sin(gw.ph)*0.025*gw.amp;
     }
   }
   { const byId = {}; for(const p of T.people) byId[p.it.id] = p; for(const p of T.people){ const ps = poseAt(p.it, TIME); if(animateActions(p, ps, byId, now)) busy = true; } }
@@ -3764,6 +3819,60 @@ $('#shareto').addEventListener('click', async e => {
 });
 $('#shareto-email').addEventListener('keydown', e => { if(e.key==='Enter') $('#shareto-send').click(); });
 
+/* ---------------- button hook ----------------
+   Built from the end of his route: finds the nearest doorway, works out which side he's on and which door frame
+   (jamb) is his, then lays waypoints on a tight arc around that jamb, through the doorway and back along the inside
+   wall on his own side. The muzzle goes on the jamb, then comes around with him and digs his near corner. He does not
+   sweep into the room: add a look or sweep at the last point once that corner is clear. */
+const BH_HUG = {t:['Tight', 1.2], n:['Normal', 1.6], w:['Wide', 2.1]};   // feet from the door frame to his centre as he pivots
+let bhHug = 'n'; try{ const v = localStorage.getItem('cqb-bh-hug'); if(BH_HUG[v]) bhHug = v; }catch(e){}
+const isWall = e => !!e && (e.t==='w' || e.t==='n');
+// the whole opening a doorway edge belongs to (side-by-side doors and openings count as one)
+function openingSpan(key){
+  const [d, x, y] = parseKey(key), h = d==='h', line = h ? y : x; let a0 = h ? x : y, a1 = a0 + 1;
+  const kAt = u => h ? `h,${u},${line}` : `v,${line},${u}`, open = u => { const e = S.edges.get(kAt(u)); return e && (e.t==='d' || e.t==='o'); };
+  while(open(a0-1)) a0--; while(open(a1)) a1++;
+  return {h, line, a0, a1};
+}
+function nearestDoorway(px, py, maxD){
+  let best = null;
+  for(const [k, e] of S.edges){ if(e.t!=='d' && e.t!=='o') continue; const [d, x, y] = parseKey(k), [x1, y1, x2, y2] = edgePts(d, x, y), dd = distSeg(px, py, x1, y1, x2, y2);
+    if(dd <= maxD && (!best || dd < best.d)) best = {k, d:dd}; }
+  return best;
+}
+function buttonHook(it){
+  const path = it.path || [], last = path.length ? path[path.length-1] : {x:it.x, y:it.y}, sp = (path.length && path[path.length-1].sp) || 5;
+  const dw = nearestDoorway(last.x, last.y, 2.6);
+  if(!dw){ toast('Put the end of his route next to a doorway first (within about 8 ft)'); return false; }
+  const o = openingSpan(dw.k), mu = o.h ? last.x : last.y, mv = o.h ? last.y : last.x, side = Math.sign(mv - o.line);
+  if(!side){ toast('Move the end of his route off the doorway, to the side he’s coming from'); return false; }
+  const P = (u, v) => o.h ? {x:u, y:v} : {x:v, y:u};
+  // his jamb is the door frame on his side of the opening; t points from it across the doorway
+  const J = mu <= (o.a0 + o.a1)/2 ? o.a0 : o.a1, t = J===o.a0 ? 1 : -1, r = BH_HUG[bhHug][1]/FT;
+  // his near corner: follow the inside of the wall away from the doorway until a wall turns into the room or the wall ends
+  const along = u => o.h ? `h,${u},${o.line}` : `v,${o.line},${u}`;
+  const perp = u => o.h ? `v,${u},${side>0 ? o.line-1 : o.line}` : `h,${side>0 ? o.line-1 : o.line},${u}`;
+  let D = 3;
+  for(let k=1;k<=24;k++){ const u = J - t*k, seg = along(Math.min(u, u + t));
+    if(!isWall(S.edges.get(seg))){ D = k - 1; break; }
+    if(isWall(S.edges.get(perp(u)))){ D = k; break; }
+    if(k===24) D = 3; }
+  D = Math.max(D, 0.8);
+  const corner = P(J - t*(D - 0.22), o.line - side*0.3), jambIn = P(J - t*0.3, o.line - side*1.0), jambIn2 = P(J - t*0.6, o.line - side*1.0);
+  const pts = [];
+  for(const [phi, look] of [[0, jambIn], [45, jambIn], [90, jambIn2], [135, corner], [180, corner]]){
+    const a = rad(phi), q = P(J + t*r*Math.sin(a), o.line + side*r*Math.cos(a)); pts.push({x:q.x, y:q.y, look}); }
+  const sEnd = clamp(D - 0.8, 0.45, 1.6); if(sEnd > r*0.4){ const q = P(J - t*sEnd, o.line - side*r); pts.push({x:q.x, y:q.y, look:corner}); }
+  // skip the first arc point if he's already standing on it
+  if(Math.hypot(pts[0].x - last.x, pts[0].y - last.y) < 0.12) pts.shift();
+  checkpoint(); if(!it.path) it.path = [];
+  for(const q of pts) it.path.push({x:r2(q.x), y:r2(q.y), sp, w:0, go:'', g:null, lx:r2(q.look.x), ly:r2(q.look.y)});
+  sel = {type:'wp', id:it.id, i:it.path.length-1}; changed(); renderInspector();
+  const e = S.edges.get(dw.k);
+  toast(e && e.t==='d' && !(e.a===-1 || e.a > 60) ? 'Button hook added · the door is closed, so give someone an Open door before he goes' : 'Button hook added · he digs his corner. Add a look or sweep at the last point once it’s clear');
+  return true;
+}
+
 /* ---------------- movable panels ----------------
    The selection panel and the object picker can be dragged anywhere on the plan by their grip (the bar along the top)
    or, with a mouse, by any empty part of the panel. The spot is remembered on this device. Double-click the grip to
@@ -3819,7 +3928,7 @@ const TOUR = [
   {sel:'#tool-object', t:'Furniture and cover', b:'Couches, tables, wardrobes, crates and more. Tall items, drawn with an <b>X</b>, block line of sight. Low ones only hide a kneeling man.'},
   {sel:'#tool-f', t:'Place people', b:'<b>Friendly</b>, <b>Hostile</b> and <b>Civilian</b>: tap the plan to place one. Drag the orange dot to set which way he faces. Tap a person to set his tag, gun posture and stance.'},
   {sel:'#tool-path', t:'Plan their moves', b:'Pick <b>Path</b>, tap a person, then tap or drag to draw his route. Tap his route line to <b>add a point in between</b>. Tap a waypoint to set his <b>speed</b> and <b>facing</b> (drag the eye to where he should look).'},
-  {sel:'#tools', t:'Actions make it a plan', b:'At each waypoint, add actions that run in order: <b>look</b> or <b>sweep</b>, change <b>gun posture</b>, <b>signal</b> a teammate (nod, tricep squeeze), <b>open a door</b>, <b>throw a flashbang</b>. Then chain the team: <b>wait for signal</b>, <b>wait for door</b>, <b>move with</b>, <b>move when he reaches</b> a spot, <b>move on bang</b>.'},
+  {sel:'#tools', t:'Actions make it a plan', b:'At each waypoint, add actions that run in order: <b>look</b> or <b>sweep</b>, change <b>gun posture</b>, <b>signal</b> a teammate (nod, tricep squeeze), <b>open a door</b>, <b>throw a flashbang</b>. Then chain the team: <b>wait for signal</b>, <b>wait for door</b>, <b>move with</b>, <b>move when he reaches</b> a spot, <b>move on bang</b>. <b>Button hook</b> builds the whole hook around a door frame for you.'},
   {sel:'#timeline', t:'Play it back', b:'Press <b>play</b> to run the plan. Drag the slider to any moment. The markers show notes, gates and flashbangs. <b>Steps</b> lists every note.'},
   {sel:'#tool-note', t:'Notes for the team', b:'Pick <b>Note</b> and tap right on someone’s route. The note pops up when he gets there, pauses the playback, and goes away when you press <b>Continue</b>.'},
   {sel:'#btn-routes', t:'See what they see', b:'<b>Routes</b> hides the lines for a clean demo. <b>View cones</b> show where everyone is looking. <b>Threat view</b> shades what the hostiles can see. Tap a person and choose <b>Show what they see</b> to shade his dead space.'},
