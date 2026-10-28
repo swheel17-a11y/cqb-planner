@@ -149,6 +149,9 @@ header.bar .acts{flex-direction:row;align-items:center}
 .card.moved{max-width:none}
 .card.dragging{cursor:grabbing;box-shadow:0 18px 44px rgba(0,0,0,.28);opacity:.97;user-select:none;-webkit-user-select:none}
 .card.dragging *{cursor:grabbing!important}
+.zip-men{display:flex;flex-direction:column;gap:4px}
+.zip-man{display:grid;grid-template-columns:22px 40px 1fr;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--line)}
+.zip-chk{display:flex;gap:8px;align-items:flex-start;font-size:14px}
 .lib-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .lib-row.cur .lib-main b{color:var(--accent)}
 .lib-main{flex:1 1 180px;min-width:0;display:flex;flex-direction:column}
@@ -487,6 +490,19 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
         <div id="cam-list"></div>
         <button class="btn primary wide" id="cam-add">Add a key from the current view</button>
       </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="zipper" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="zip-h">
+      <div class="sheet-head"><div><div class="eyebrow">Room entry</div><h2 id="zip-h">Zipper entry</h2></div><button class="ib" data-close="zipper" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <p class="small" style="margin:0">The stack flows in alternating sides: each man goes the opposite way to the man in front of him. #1 and #2 go deep to their corners, the rest stop a step or two inside. Everyone digs his own corner first.</p>
+      <div class="block" style="border-top:0;padding-top:0"><h3>Who goes</h3><div id="zip-men" class="zip-men"></div></div>
+      <div class="block"><h3>First man</h3><div class="seg"><button data-zfirst="hook">Button hook (his side)</button><button data-zfirst="cross">Crisscross (far side)</button></div></div>
+      <div class="block"><h3>Tempo</h3><div class="seg"><button data-ztempo="d">Deliberate</button><button data-ztempo="s">Steady</button><button data-ztempo="x">Dynamic</button></div><p class="small" id="zip-tempo-help" style="margin:0"></p></div>
+      <div class="block"><label class="zip-chk"><input type="checkbox" id="zip-sectors"> After clearing his corner, each man pauses, then turns to work his sector</label></div>
+      <p class="small" style="margin:0">This replaces what these men do past the door. Undo puts it back. Hug distance follows Tight / Normal / Wide.</p>
+      <div class="row"><button class="btn primary" id="zip-build">Build the entry</button></div>
     </div>
   </div>
 
@@ -2018,7 +2034,7 @@ function renderInspector(){
       ${stuckNote(it)}
       ${actsEditor(it, it, -1)}
       <div class="insp-row"><span class="lbl">Route</span><div class="row"><button class="btn ${tool==='path'?'on':''}" data-act="draw">${n?'Add to route':'Draw route'}</button>${n?'<button class="btn" data-act="wpfirst">Edit waypoints</button><button class="btn" data-act="rclear">Clear route</button>':''}</div></div>
-      <div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From the end of his route. To hook from a waypoint in the middle, tap that waypoint and use Button hook there. He pivots tight around the door frame on his side and digs his near corner; no sweep until you add one.</span></div>
+      <div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button><button class="btn" data-act="xcross">Crisscross</button><button class="btn" data-act="zipper">Zipper entry…</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From the end of his route (to start from a waypoint in the middle, tap that waypoint). Button hook pivots around the door frame on his side; Crisscross cuts across to the far side. Either way he digs his corner, with no sweep until you add one. Zipper entry builds the whole stack.</span></div>
       <div class="insp-actions"><button class="btn ${on?'on':''}" data-act="los">${on?'Hide':'Show'} what they see</button><button class="btn" data-act="eyes">Ride along</button><button class="btn danger" data-act="del">Delete</button></div>`;
     } else if(it.k==='label'){
       h = `<div class="insp-head">Label</div>
@@ -2042,7 +2058,7 @@ function renderInspector(){
     <div class="insp-row"><span class="lbl">Speed</span>${seg('sp', spOpts, spCur, 'sm')}</div>
     <div class="insp-row"><span class="lbl">Facing</span>${seg('facing', [['travel','Where he’s walking'],['point','Watch a point']], w.lx!=null ? 'point' : 'travel', 'sm')}<span class="small">${w.lx!=null ? 'Drag the eye to aim it. He turns to it on the way here and keeps watching it.' : 'Or drag the eye next to the waypoint.'}</span></div>
     ${actsEditor(it, w, sel.i)}
-    ${`<div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From this waypoint (put it within about 10 ft of the door, on his side): he pivots tight around the door frame on his side and digs his near corner. No sweep until you add one.</span></div>`}
+    ${`<div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button><button class="btn" data-act="xcross">Crisscross</button><button class="btn" data-act="zipper">Zipper entry…</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From this waypoint (within about 10 ft of the door, on his side). Button hook pivots around the door frame on his side; Crisscross cuts across to the far side. He digs his corner, with no sweep until you add one. Zipper entry builds the whole stack from here.</span></div>`}
     <div class="insp-actions"><button class="btn" data-act="wprev" aria-label="Previous waypoint">◀</button><button class="btn" data-act="wnext" aria-label="Next waypoint">▶</button><button class="btn" data-act="wjump">Jump to ${at} s</button><button class="btn" data-act="wperson">Person</button><button class="btn danger" data-act="del">Delete waypoint</button></div>`;
   } else if(sel.type==='step'){
     const st = getStep(sel.id); if(!st){ sel=null; insp.hidden=true; return; }
@@ -2087,7 +2103,9 @@ insp.addEventListener('click', e => {
   if(READONLY) return;
   if(act.startsWith('a-')){ actClick(act, v, +b.dataset.ai); return; }
   if(act==='bhug'){ bhHug = v; try{ localStorage.setItem('cqb-bh-hug', v); }catch(err){} renderInspector(); return; }
-  if(act==='bhook'){ const who = getItem(sel.id); if(who && (sel.type==='item' || sel.type==='wp')) buttonHook(who, sel.type==='wp' ? sel.i : undefined); return; }
+  if(act==='bhook' || act==='xcross' || act==='zipper'){ const who = getItem(sel.id); if(!who || !(sel.type==='item' || sel.type==='wp')) return;
+    const from = sel.type==='wp' ? sel.i : (who.path ? who.path.length - 1 : -1);
+    if(act==='zipper') openZipper(who, from); else entryMove(who, from, act==='bhook' ? 'hook' : 'cross'); return; }
   if(sel.type==='item'){
     const it = getItem(sel.id); if(!it) return;
     if(act==='los'){ losId = losId===it.id ? null : it.id; drawPlan(); renderInspector(); if(T) T.dirty=true; return; }
@@ -3834,21 +3852,16 @@ $('#shareto').addEventListener('click', async e => {
 });
 $('#shareto-email').addEventListener('keydown', e => { if(e.key==='Enter') $('#shareto-send').click(); });
 
-/* ---------------- button hook ----------------
-   Built from the end of his route: finds the nearest doorway, works out which side he's on and which door frame
-   (jamb) is his, then lays waypoints on a tight arc around that jamb, through the doorway and back along the inside
-   wall on his own side. The muzzle goes on the jamb, then comes around with him and digs his near corner. He does not
-   sweep into the room: add a look or sweep at the last point once that corner is clear. */
+/* ---------------- room entry moves ----------------
+   Button hook: pivots tight around the door frame on his own side and digs his near corner.
+   Crisscross: cuts diagonally through the doorway to the far side and digs the far corner.
+   Both start from where he is: if he's already in the doorway he doesn't step back out. The muzzle never swings back
+   toward the stack, and nobody sweeps the room until a look or sweep is added (Zipper entry can add it after a pause).
+   Zipper entry builds the whole stack: room sides alternate man by man, #1 and #2 go deep toward their corners,
+   #3 and #4 stop a step or two inside, and each man moves off when the man ahead reaches a set point in the doorway. */
 const BH_HUG = {t:['Tight', 1.2], n:['Normal', 1.6], w:['Wide', 2.1]};   // feet from the door frame to his centre as he pivots
 let bhHug = 'n'; try{ const v = localStorage.getItem('cqb-bh-hug'); if(BH_HUG[v]) bhHug = v; }catch(e){}
 const isWall = e => !!e && (e.t==='w' || e.t==='n');
-// the whole opening a doorway edge belongs to (side-by-side doors and openings count as one)
-function openingSpan(key){
-  const [d, x, y] = parseKey(key), h = d==='h', line = h ? y : x; let a0 = h ? x : y, a1 = a0 + 1;
-  const kAt = u => h ? `h,${u},${line}` : `v,${line},${u}`, open = u => { const e = S.edges.get(kAt(u)); return e && (e.t==='d' || e.t==='o'); };
-  while(open(a0-1)) a0--; while(open(a1)) a1++;
-  return {h, line, a0, a1};
-}
 // every doorway on the plan: runs of door/opening pieces, and gaps left in a wall (up to 12 ft wide) with wall on both sides
 function doorways(){
   const out = [], wallAt = (h, line, u) => isWall(S.edges.get(h ? `h,${u},${line}` : `v,${line},${u}`)),
@@ -3862,7 +3875,6 @@ function doorways(){
         let v = u, hasOpen = false; while(v < len && !wallAt(h, line, v)){ if(openAt(h, line, v)) hasOpen = true; v++; }
         const boxed = u > 0 && v < len && wallAt(h, line, u-1) && wallAt(h, line, v);
         if(hasOpen || (boxed && v - u <= 4)){
-          // trim empty ends off a door/opening run that isn't boxed in by walls
           let a0 = u, a1 = v; if(!boxed){ while(a0 < a1 && !openAt(h, line, a0)) a0++; while(a1 > a0 && !openAt(h, line, a1-1)) a1--; }
           let door = null; for(let w=a0; w<a1; w++){ const k = h ? `h,${w},${line}` : `v,${line},${w}`, e = S.edges.get(k); if(e && e.t==='d'){ door = k; break; } }
           out.push({h, line, a0, a1, door}); }
@@ -3875,48 +3887,183 @@ function nearestDoorway(px, py, maxD){
     if(d <= maxD && (!best || d < best.d)) best = {o, d}; }
   return best;
 }
-// from: the waypoint index to hook from (-1 = where he starts). The hook goes in right after it.
-function buttonHook(it, from){
-  const path = it.path || []; if(from==null) from = path.length - 1;
-  const last = from >= 0 ? path[from] : {x:it.x, y:it.y}, before = from > 0 ? path[from-1] : from===0 ? {x:it.x, y:it.y} : null;
-  const sp = (from >= 0 && path[from].sp) || 5;
-  const dw = nearestDoorway(last.x, last.y, 3.5);
-  if(!dw){ toast(from >= 0 ? 'This waypoint is too far from a doorway · put it within about 10 ft of the door, on the side he’s coming from' : 'He’s too far from a doorway · tap the waypoint next to the door, then Button hook'); return false; }
-  const o = dw.o, mu = o.h ? last.x : last.y, mv = o.h ? last.y : last.x;
-  // which side he comes from: where he's standing, or where he came from if he's right on the doorway line
+// a doorway seen from one side: plan point for (along the wall u, across it v), the room's inside, corners and depth
+function doorFrame(o, side){
+  const P = (u, v) => o.h ? {x:u, y:v} : {x:v, y:u}, along = u => o.h ? `h,${u},${o.line}` : `v,${o.line},${u}`;
+  const perp = u => o.h ? `v,${u},${side>0 ? o.line-1 : o.line}` : `h,${side>0 ? o.line-1 : o.line},${u}`;
+  // distance along the inside of the door wall from a jamb to the corner it runs into
+  const cornerDist = (J, t) => { for(let k=1;k<=24;k++){ const u = J - t*k; if(!isWall(S.edges.get(along(Math.min(u, u + t))))) return Math.max(0.8, k - 1); if(isWall(S.edges.get(perp(u)))) return k; } return 3; };
+  const mid = (o.a0 + o.a1)/2;
+  // how deep the room is straight in from the doorway
+  let depth = 4; for(let k=1;k<=30;k++){ const v = o.line - side*k, key = o.h ? `h,${Math.floor(mid)},${v}` : `v,${v},${Math.floor(mid)}`; if(isWall(S.edges.get(key))){ depth = k; break; } }
+  return {P, mid, cornerDist, depth};
+}
+/* one man's entry, as plan points with what he's watching at each: kind 'hook' (his own side) or 'cross' (far side).
+   start: where he is now; side: which side of the door line he's on (+1/-1); room: which way along the wall he ends up (+1/-1). */
+function entryPath(o, side, start, kind, sEnd, r){
+  const F = doorFrame(o, side), P = F.P, mu = o.h ? start.x : start.y, mv = o.h ? start.y : start.x;
+  const J = room => room < 0 ? o.a0 : o.a1, tIn = room => room < 0 ? 1 : -1;              // the jamb on a side, and the way from it into the doorway
+  const lat = mu < F.mid ? -1 : 1, room = kind==='hook' ? lat : -lat;
+  const JR = J(room), tR = tIn(room), D = F.cornerDist(JR, tR);
+  const corner = P(JR - tR*(D - 0.22), o.line - side*0.3);
+  const end = clamp(sEnd==null ? Math.min(D - 0.8, 1.6) : sEnd, 0.45, Math.max(0.45, D - 0.55));
+  const pts = []; let thr = -1;
+  if(kind==='hook'){
+    const jambIn = P(JR - tR*0.3, o.line - side*1.0), jambIn2 = P(JR - tR*0.6, o.line - side*1.0);
+    // where he already is on the arc around his jamb (0 = straight out from it, 90 = in the doorway, 180 = just inside)
+    const at = (mu - JR)*tR, an = (mv - o.line)*side, near = Math.hypot(at, an) < 2.2*r;
+    const phi0 = near ? clamp(deg(Math.atan2(at, an)), 0, 180) : -1;
+    for(const [phi, look] of [[0, jambIn], [45, jambIn], [90, jambIn2], [135, corner], [180, corner]]){
+      if(phi <= phi0 + 12) continue;
+      const a = rad(phi), q = P(JR + tR*r*Math.sin(a), o.line + side*r*Math.cos(a)); if(phi===90) thr = pts.length; pts.push({x:q.x, y:q.y, look}); }
+    if(thr < 0) thr = 0;
+    if(end > r*0.4){ const q = P(JR - tR*end, o.line - side*r); pts.push({x:q.x, y:q.y, look:corner}); }
+  } else {
+    const JA = J(-room), tA = tIn(-room), w = o.a1 - o.a0;
+    const far = Math.hypot(mu - (JA + tA*0.25), mv - (o.line + side*0.45));
+    if((mv - o.line)*side > 0.25 && far > 0.35){ const q = P(JA + tA*0.25, o.line + side*0.45); pts.push({x:q.x, y:q.y, look:corner}); }
+    const c1 = P(F.mid + (JR - F.mid)*0.35, o.line); thr = pts.length; pts.push({x:c1.x, y:c1.y, look:corner});
+    const c2 = P(JR - tR*0.12, o.line - side*Math.min(r, 0.55)); pts.push({x:c2.x, y:c2.y, look:corner});
+    if(end > 0.3){ const q = P(JR - tR*end, o.line - side*r); pts.push({x:q.x, y:q.y, look:corner}); }
+    void w;
+  }
+  return {pts, thr, room, corner, D, F};
+}
+// which doorway he's using and which side he's coming from
+function entryStart(it, from){
+  const path = it.path || [], last = from >= 0 ? path[from] : {x:it.x, y:it.y}, before = from > 0 ? path[from-1] : from===0 ? {x:it.x, y:it.y} : null;
+  const dw = nearestDoorway(last.x, last.y, 3.5); if(!dw) return {err:'far'};
+  const o = dw.o, mv = o.h ? last.y : last.x;
   let side = Math.abs(mv - o.line) > 0.12 ? Math.sign(mv - o.line) : 0;
   if(!side && before){ const bv = o.h ? before.y : before.x; side = Math.sign(bv - o.line); }
-  if(!side){ toast('Move this waypoint off the doorway, to the side he’s coming from'); return false; }
-  const P = (u, v) => o.h ? {x:u, y:v} : {x:v, y:u};
-  // his jamb is the door frame on his side of the opening; t points from it across the doorway
-  const J = mu <= (o.a0 + o.a1)/2 ? o.a0 : o.a1, t = J===o.a0 ? 1 : -1, r = BH_HUG[bhHug][1]/FT;
-  // his near corner: follow the inside of the wall away from the doorway until a wall turns into the room or the wall ends
-  const along = u => o.h ? `h,${u},${o.line}` : `v,${o.line},${u}`;
-  const perp = u => o.h ? `v,${u},${side>0 ? o.line-1 : o.line}` : `h,${side>0 ? o.line-1 : o.line},${u}`;
-  let D = 3;
-  for(let k=1;k<=24;k++){ const u = J - t*k, seg = along(Math.min(u, u + t));
-    if(!isWall(S.edges.get(seg))){ D = k - 1; break; }
-    if(isWall(S.edges.get(perp(u)))){ D = k; break; }
-    if(k===24) D = 3; }
-  D = Math.max(D, 0.8);
-  const corner = P(J - t*(D - 0.22), o.line - side*0.3), jambIn = P(J - t*0.3, o.line - side*1.0), jambIn2 = P(J - t*0.6, o.line - side*1.0);
-  const pts = [];
-  for(const [phi, look] of [[0, jambIn], [45, jambIn], [90, jambIn2], [135, corner], [180, corner]]){
-    const a = rad(phi), q = P(J + t*r*Math.sin(a), o.line + side*r*Math.cos(a)); pts.push({x:q.x, y:q.y, look}); }
-  const sEnd = clamp(D - 0.8, 0.45, 1.6); if(sEnd > r*0.4){ const q = P(J - t*sEnd, o.line - side*r); pts.push({x:q.x, y:q.y, look:corner}); }
-  // skip the first arc point if he's already standing on it
-  if(Math.hypot(pts[0].x - last.x, pts[0].y - last.y) < 0.12) pts.shift();
-  checkpoint(); if(!it.path) it.path = [];
-  const k = pts.length, later = it.path.length - (from + 1);
-  for(const a of routeAnchors(it)) if(a.seg >= from + 1) a.seg += k;   // notes and "move when he reaches" pins further along stay on their legs
+  if(!side) return {err:'line'};
+  return {o, side, last, sp:(from >= 0 && path[from].sp) || 5};
+}
+function insertMove(it, from, pts, sp){
+  if(!it.path) it.path = [];
+  const k = pts.length;
+  for(const a of routeAnchors(it)) if(a.seg >= from + 1) a.seg += k;
   it.path.splice(from + 1, 0, ...pts.map(q => ({x:r2(q.x), y:r2(q.y), sp, w:0, go:'', g:null, lx:r2(q.look.x), ly:r2(q.look.y)})));
+  return k;
+}
+function entryMove(it, from, kind){
+  const path = it.path || []; if(from==null) from = path.length - 1;
+  const st = entryStart(it, from);
+  if(st.err==='far'){ toast(from >= 0 ? 'This waypoint is too far from a doorway · put it within about 10 ft of the door, on the side he’s coming from' : 'He’s too far from a doorway · tap the waypoint next to the door first'); return false; }
+  if(st.err==='line'){ toast('Move this waypoint off the doorway, to the side he’s coming from'); return false; }
+  const ep = entryPath(st.o, st.side, st.last, kind, null, BH_HUG[bhHug][1]/FT); if(!ep.pts.length){ toast('He’s already through the doorway'); return false; }
+  checkpoint(); const later = path.length - (from + 1), k = insertMove(it, from, ep.pts, st.sp);
   sel = {type:'wp', id:it.id, i:from + k}; changed(); renderInspector();
-  const e = o.door && S.edges.get(o.door);
-  toast(later > 0 ? `Button hook added after this waypoint · ${later===1 ? 'his next waypoint still follows it, so delete it if he no longer needs it' : `his ${later} later waypoints still follow it, so delete any he no longer needs`}`
-    : e && e.t==='d' && !(e.a===-1 || e.a > 60) ? 'Button hook added · the door is closed, so give someone an Open door before he goes' : 'Button hook added · he digs his corner. Add a look or sweep at the last point once it’s clear');
+  const e = st.o.door && S.edges.get(st.o.door), name = kind==='hook' ? 'Button hook' : 'Crisscross';
+  toast(later > 0 ? `${name} added after this waypoint · ${later===1 ? 'his next waypoint still follows it, so delete it if he no longer needs it' : `his ${later} later waypoints still follow it, so delete any he no longer needs`}`
+    : e && !(e.a===-1 || e.a > 60) ? `${name} added · the door is closed, so give someone an Open door before he goes` : `${name} added · he digs his corner. Add a look or sweep at the last point once it’s clear`);
   return true;
 }
+const buttonHook = (it, from) => entryMove(it, from, 'hook');
 
+/* ---- zipper: the whole stack through one doorway ---- */
+const ZIP_TEMPO = {d:['Deliberate', 4, 0.9], s:['Steady', 5.5, 0.45], x:['Dynamic', 7, 0.2]};   // name, ft/s, seconds each man steps off after the man ahead
+let zip = {first:'hook', tempo:'s', sectors:true, ids:[], from:null};
+try{ const v = JSON.parse(localStorage.getItem('cqb-zip') || 'null'); if(v){ zip.first = v.first==='cross' ? 'cross' : 'hook'; zip.tempo = ZIP_TEMPO[v.tempo] ? v.tempo : 's'; zip.sectors = v.sectors !== false; } }catch(e){}
+const tagNum = q => { const n = parseInt(q.l, 10); return isNaN(n) ? 99 : n; };
+// the last waypoint he reaches before the doorway (-1 = his start), on the given side of the door line
+function outsideIndex(q, o, side){
+  const vOf = p => o.h ? p.y : p.x; let idx = (vOf(q) - o.line)*side > 0 ? -1 : null;
+  (q.path || []).every((w, i) => { if((vOf(w) - o.line)*side > 0.05){ idx = i; return true; } return false; });
+  return idx;
+}
+function zipperCandidates(it, from){
+  const st = entryStart(it, from); if(st.err) return st;
+  const men = S.items.filter(q => q.k==='f').map(q => { const i = q===it ? from : outsideIndex(q, st.o, st.side); if(i==null) return null;
+      const p = i >= 0 ? q.path[i] : {x:q.x, y:q.y}, d = st.o.h ? distSeg(p.x, p.y, st.o.a0, st.o.line, st.o.a1, st.o.line) : distSeg(p.x, p.y, st.o.line, st.o.a0, st.o.line, st.o.a1);
+      return d <= 5 ? {q, i, d} : null; }).filter(Boolean)
+    .sort((a, b) => (a.q===it ? -1 : b.q===it ? 1 : tagNum(a.q) - tagNum(b.q) || a.d - b.d));
+  return {st, men};
+}
+function openZipper(it, from){
+  const c = zipperCandidates(it, from);
+  if(c.err==='far'){ toast('Tap the waypoint next to the door first (within about 10 ft), then Zipper entry'); return; }
+  if(c.err==='line'){ toast('Move this waypoint off the doorway, to the side he’s coming from'); return; }
+  zip.from = {id:it.id, i:from}; zip.ids = c.men.map(m => m.q.id);
+  renderZipper(); $('#zipper').hidden = false;
+}
+function renderZipper(){
+  const it = getItem(zip.from.id), c = it && zipperCandidates(it, zip.from.i); if(!c || c.err){ $('#zipper').hidden = true; return; }
+  const chosen = c.men.filter(m => zip.ids.includes(m.q.id));
+  const plan = zipPlan(c.st, chosen);
+  $('#zip-men').innerHTML = c.men.map((m, n) => { const on = zip.ids.includes(m.q.id), k = chosen.indexOf(m), pl = k >= 0 ? plan[k] : null;
+    return `<label class="zip-man"><input type="checkbox" data-zid="${m.q.id}" ${on?'checked':''} ${m.q===it?'disabled':''}><b>${esc(tagOf(m.q))}</b><span class="small">${pl ? `${pl.kind==='hook'?'Button hook':'Crisscross'} · goes ${pl.room===c.st.lr.left?'left':'right'} · ${k<2?'deep to his corner':'stops just inside'}` : 'stays out'}</span></label>`; }).join('');
+  document.querySelectorAll('#zipper [data-zfirst]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.zfirst===zip.first)));
+  document.querySelectorAll('#zipper [data-ztempo]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ztempo===zip.tempo)));
+  $('#zip-sectors').checked = zip.sectors;
+  $('#zip-tempo-help').textContent = `${ZIP_TEMPO[zip.tempo][1]} ft/s. Each man steps off about ${ZIP_TEMPO[zip.tempo][2]} s after the man ahead, a little later wherever that’s needed to keep 2 ft between them.`;
+}
+// room side for each man in order (alternating), and whether that makes his move a hook or a cross
+function zipPlan(st, men){
+  const o = st.o, F = doorFrame(o, st.side), uOf = p => o.h ? p.x : p.y;
+  // "left" as he faces the room: the stack faces -side across the line
+  st.lr = {left: (o.h ? (st.side > 0 ? -1 : 1) : (st.side > 0 ? 1 : -1))};
+  return men.map((m, k) => {
+    const p = m.i >= 0 ? m.q.path[m.i] : {x:m.q.x, y:m.q.y}, lat = uOf(p) < F.mid ? -1 : 1;
+    const firstLat = (() => { const m0 = men[0], p0 = m0.i >= 0 ? m0.q.path[m0.i] : {x:m0.q.x, y:m0.q.y}; return uOf(p0) < F.mid ? -1 : 1; })();
+    const room0 = zip.first==='hook' ? firstLat : -firstLat, room = k % 2 ? -room0 : room0;
+    return {m, room, kind: room===lat ? 'hook' : 'cross'};
+  });
+}
+function buildZipper(){
+  const it = getItem(zip.from.id), c = it && zipperCandidates(it, zip.from.i); if(!c || c.err) return;
+  const men = c.men.filter(m => zip.ids.includes(m.q.id)); if(!men.length) return;
+  const plan = zipPlan(c.st, men), o = c.st.o, side = c.st.side, F = doorFrame(o, side), tempo = ZIP_TEMPO[zip.tempo], r = BH_HUG[bhHug][1]/FT;
+  checkpoint();
+  let prev = null;
+  plan.forEach((pl, k) => {
+    const q = pl.m.q, from = pl.m.i;
+    // drop whatever he did past the door before: the zipper replaces it
+    if(q.path){ q.path = q.path.slice(0, from + 1); if(!q.path.length) delete q.path; }
+    const start = from >= 0 ? q.path[from] : {x:q.x, y:q.y};
+    const D0 = F.cornerDist(pl.room < 0 ? o.a0 : o.a1, pl.room < 0 ? 1 : -1);
+    const deep = k < 2, sEnd = deep ? clamp(D0 - 1.0, 1.2, 3.0) : clamp(Math.min(D0 - 0.6, 1.0), 0.6, 1.2) + (k >= 4 ? -0.3 : 0);
+    // the move itself, forced to the planned room side
+    const startLat = (o.h ? start.x : start.y) < F.mid ? -1 : 1, kind = pl.room===startLat ? 'hook' : 'cross';
+    const ep = entryPath(o, side, start, kind, sEnd, r + (k >= 4 ? 0.25 : 0));
+    // #1 and #2 dig their corners; the men behind them come in covering their sector of the room instead,
+    // so nobody's muzzle runs down the wall into the man already working that corner
+    const sector = deep ? F.P((pl.room < 0 ? o.a0 : o.a1) - (pl.room < 0 ? 1 : -1)*(D0 - 0.4), o.line - side*(F.depth - 0.4))
+      : F.P(F.mid + pl.room*Math.min(1.5, (o.a1 - o.a0) + 0.5), o.line - side*Math.max(1, F.depth*0.7));
+    if(!deep) ep.pts.forEach(pt => { pt.look = sector; });
+    insertMove(q, from, ep.pts, tempo[1]);
+    const owner = from >= 0 ? q.path[from] : q;
+    // timing: everyone after #1 steps off a moment after the man ahead of him moves
+    if(prev){ owner.acts = (owner.acts || []).filter(a => a.k!=='wloc' && a.k!=='mwith'); owner.acts.push({k:'mwith', who:prev.q.id, d:tempo[2], zip:1}); }
+    // after his corner, a short pause, then he turns to work his sector
+    const lastW = q.path[q.path.length - 1];
+    if(zip.sectors && lastW && deep){ const target = sector;
+      lastW.acts = (lastW.acts || []).filter(a => !(a.k==='look' && a.zip)); lastW.acts.push({k:'wait', d:0.5}, {k:'look', x:r2(target.x), y:r2(target.y), d:0, sw:0, zip:1}); }
+    prev = {q, from, thr:ep.thr, n:ep.pts.length};
+  });
+  // spacing: if a man would come within 2 ft of anyone ahead of him while moving, he steps off a little later
+  changed();
+  const order = plan.map(pl => pl.m.q), CLEAR = 2.0/FT;
+  for(let k=1;k<order.length;k++){
+    const q = order[k], from = plan[k].m.i, owner = from >= 0 ? q.path[from] : q, a = (owner.acts||[]).find(x => x.k==='mwith' && x.zip); if(!a) continue;
+    for(let tries=0; tries<30; tries++){
+      const sc = sched(), mine = sc.map.get(q.id); if(!mine || mine.stuck) break;
+      const t0 = (mine.ph.find(x => x.k==='m') || {t0:0}).t0; let tooClose = false;
+      for(let t=t0; t<=mine.end + 0.3 && !tooClose; t+=1/30){ const me = poseAt(q, t);
+        for(let j=0;j<k;j++){ const o2 = poseAt(order[j], t); if(Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
+      if(!tooClose) break;
+      a.d = r2((a.d||0) + 0.1); changed(); } }
+  try{ localStorage.setItem('cqb-zip', JSON.stringify({first:zip.first, tempo:zip.tempo, sectors:zip.sectors})); }catch(e){}
+  $('#zipper').hidden = true; sel = {type:'item', id:it.id}; changed(); renderInspector(); setTime(0);
+  toast(`Zipper built for ${men.length} men · press play. Undo puts their old moves back`);
+}
+
+$('#zipper').addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.zfirst){ zip.first = b.dataset.zfirst; renderZipper(); }
+  if(b.dataset.ztempo){ zip.tempo = b.dataset.ztempo; renderZipper(); }
+  if(b.id==='zip-build') buildZipper(); });
+$('#zipper').addEventListener('change', e => { const c = e.target.closest('[data-zid]'); if(c){ const id = c.dataset.zid; zip.ids = c.checked ? [...new Set(zip.ids.concat(id))] : zip.ids.filter(x => x!==id); renderZipper(); }
+  if(e.target.id==='zip-sectors'){ zip.sectors = e.target.checked; } });
 /* ---------------- movable panels ----------------
    The selection panel and the object picker can be dragged anywhere on the plan by their grip (the bar along the top)
    or, with a mouse, by any empty part of the panel. The spot is remembered on this device. Double-click the grip to
@@ -3972,7 +4119,7 @@ const TOUR = [
   {sel:'#tool-object', t:'Furniture and cover', b:'Couches, tables, wardrobes, crates and more. Tall items, drawn with an <b>X</b>, block line of sight. Low ones only hide a kneeling man.'},
   {sel:'#tool-f', t:'Place people', b:'<b>Friendly</b>, <b>Hostile</b> and <b>Civilian</b>: tap the plan to place one. Drag the orange dot to set which way he faces. Tap a person to set his tag, gun posture and stance.'},
   {sel:'#tool-path', t:'Plan their moves', b:'Pick <b>Path</b>, tap a person, then tap or drag to draw his route. Tap his route line to <b>add a point in between</b>. Tap a waypoint to set his <b>speed</b> and <b>facing</b> (drag the eye to where he should look).'},
-  {sel:'#tools', t:'Actions make it a plan', b:'At each waypoint, add actions that run in order: <b>look</b> or <b>sweep</b>, change <b>gun posture</b>, <b>signal</b> a teammate (nod, tricep squeeze), <b>open a door</b>, <b>throw a flashbang</b>. Then chain the team: <b>wait for signal</b>, <b>wait for door</b>, <b>move with</b>, <b>move when he reaches</b> a spot, <b>move on bang</b>. <b>Button hook</b> builds the whole hook around a door frame for you.'},
+  {sel:'#tools', t:'Actions make it a plan', b:'At each waypoint, add actions that run in order: <b>look</b> or <b>sweep</b>, change <b>gun posture</b>, <b>signal</b> a teammate (nod, tricep squeeze), <b>open a door</b>, <b>throw a flashbang</b>. Then chain the team: <b>wait for signal</b>, <b>wait for door</b>, <b>move with</b>, <b>move when he reaches</b> a spot, <b>move on bang</b>. <b>Button hook</b>, <b>Crisscross</b> and <b>Zipper entry</b> build room entries for you.'},
   {sel:'#timeline', t:'Play it back', b:'Press <b>play</b> to run the plan. Drag the slider to any moment. The markers show notes, gates and flashbangs. <b>Steps</b> lists every note.'},
   {sel:'#tool-note', t:'Notes for the team', b:'Pick <b>Note</b> and tap right on someone’s route. The note pops up when he gets there, pauses the playback, and goes away when you press <b>Continue</b>.'},
   {sel:'#btn-routes', t:'See what they see', b:'<b>Routes</b> hides the lines for a clean demo. <b>View cones</b> show where everyone is looking. <b>Threat view</b> shades what the hostiles can see. Tap a person and choose <b>Show what they see</b> to shade his dead space.'},
