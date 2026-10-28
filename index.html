@@ -1062,7 +1062,7 @@ function rawPoseAt(it, t){
     const nx = ph[pi+1], pr = ph[pi-1], d = s*L;
     if(p.cout && nx){ const c = Math.min(CORNER_R, 0.4*L, 0.4*nx.len/FT); if(c > 0.02 && d > L - c){ const k = curve({x:p.ax,y:p.ay}, {x:p.bx,y:p.by}, {x:nx.bx,y:nx.by}, c, 0, 0, (d - (L - c))/(2*c)); x = k.x; y = k.y; dir = k.r; } }
     if(p.cin && pr){ const c = Math.min(CORNER_R, 0.4*L, 0.4*pr.len/FT); if(c > 0.02 && d < c){ const k = curve({x:pr.ax,y:pr.ay}, {x:p.ax,y:p.ay}, {x:p.bx,y:p.by}, c, 0, 0, 0.5 + d/(2*c)); x = k.x; y = k.y; dir = k.r; } }
-    return {x, y, r:p.look ? angTo(x,y,p.look) : (dir+360)%360, g:p.g, sig, moving:true, dist:p.d0 + s*p.len, v:v*p.len}; }
+    return {x, y, r:p.look ? angTo(x,y,p.look) : (dir+360)%360, g:p.g, sig, moving:true, dist:p.d0 + s*p.len, v:v*p.len, vn:p.len/Math.max(1e-6, p.t1-p.t0)}; }
   let r = p.look ? angTo(p.x,p.y,p.look) : p.r0;
   if(p.sweep) r = (r + SWEEP.half*Math.sin(2*Math.PI*(t - p.sweep.t0)/SWEEP.per) + 360) % 360;
   return {x:p.x, y:p.y, r, g:p.g, sig, dist:p.d0||0, v:0};
@@ -2443,21 +2443,36 @@ function buildFigure(kit, it, idx, col){
   return {g, body, head, pivot, L, R, armL, gait:{ph:0, amp:0}, lean:0};
 }
 // standing, walking stride, or kneeling on the right knee
+// Walking with planted feet: each foot stays put on the floor while the body passes over it (so nothing slides),
+// then swings forward to its next spot. Hip and knee angles are solved from where the foot needs to be (two-bone IK),
+// and the body dips when the feet are spread and rises over the standing leg, like a real walk.
+const LEG = {L1:1.45, L2:1.4, hip:3.0, ankle:0.15};
+function stepLength(vn, aim){ return clamp(1.15 + 0.17*vn, 1.3, 2.7) * (aim ? 0.85 : 1); }   // feet per step at a planned speed (ft/s)
+function legIK(dx, dy){   // hip → ankle offset in the leg's plane (dx forward, dy up, feet) → [hip angle, knee angle]
+  const {L1, L2} = LEG, d = clamp(Math.hypot(dx, dy), 0.3, L1 + L2 - 0.005);
+  const a = Math.atan2(dx, -dy), b = Math.acos(clamp((L1*L1 + d*d - L2*L2)/(2*L1*d), -1, 1)), k = Math.acos(clamp((L1*L1 + L2*L2 - d*d)/(2*L1*L2), -1, 1));
+  return [a + b, -(Math.PI - k)];
+}
 function poseFigure(p, ps, gstate){
   const kneel = !!p.it.p, B = p.body;
   if(kneel){ B.position.y = -1.25; p.L.hip.rotation.z = 1.45; p.L.knee.rotation.z = -1.5; p.R.hip.rotation.z = -0.15; p.R.knee.rotation.z = -1.45;
     if(p.L.foot){ p.L.foot.rotation.z = 0.05; p.R.foot.rotation.z = 1.1; } p.gait = {ph:0, amp:0}; p.lean = 0; return; }
-  const aim = gstate===2 && p.it.k!=='c', sp = ps.v || 0, amp = clamp(sp/5, 0, 1.25), a1 = Math.min(1, amp);
-  const stride = aim ? 2.0 : 2.6, ph = (ps.dist||0)/stride*Math.PI;   // one step per stride length walked
-  const s = Math.sin(ph), c = Math.cos(ph);
-  const swing = (aim ? 0.33 : 0.44)*a1, crouch = aim ? 0.22 : 0.05;
-  p.L.hip.rotation.z = s*swing + crouch*0.6; p.R.hip.rotation.z = -s*swing + crouch*0.6;
-  // the knee folds as the leg swings through, and stays a little soft when aiming
-  p.L.knee.rotation.z = -(crouch + Math.max(0, -c)*0.8*a1); p.R.knee.rotation.z = -(crouch + Math.max(0, c)*0.8*a1);
-  // feet stay level with the floor
-  if(p.L.foot){ p.L.foot.rotation.z = -(p.L.hip.rotation.z + p.L.knee.rotation.z); p.R.foot.rotation.z = -(p.R.hip.rotation.z + p.R.knee.rotation.z); }
-  B.position.y = -crouch*0.55 - Math.abs(c)*(aim ? 0.035 : 0.07)*a1;
-  p.gait = {ph, amp:a1}; p.lean = -(aim ? 0.07 : 0.03) - 0.05*a1;
+  const aim = gstate===2 && p.it.k!=='c', v = ps.v || 0, vn = ps.vn || v || 5;
+  const Snom = stepLength(vn, aim), run = clamp(v/Math.max(0.5, vn), 0, 1), S = Snom*run;   // steps shorten as he speeds up from / slows into a stop
+  const cyc = ((ps.dist||0)/(2*Snom)) % 1;                                                    // one cycle = two steps
+  const foot = u => { u = ((u % 1) + 1) % 1;
+    if(u < 0.5) return {x:S/2 - S*(u/0.5), lift:0};                                           // standing on it: moves back exactly as fast as he moves forward
+    const w = (u - 0.5)/0.5, e = w < 0.5 ? 2*w*w : 1 - Math.pow(-2*w + 2, 2)/2;
+    return {x:-S/2 + S*e, lift:0.32*Math.sin(Math.PI*w)*run}; };                              // swinging through to the next step
+  const fL = foot(cyc), fR = foot(cyc + 0.5), crouch = aim ? 0.2 : 0.04;
+  // hips drop as far as needed for both feet to reach the floor
+  const reach = f => LEG.ankle + f.lift + Math.sqrt(Math.max(0, Math.pow(LEG.L1 + LEG.L2 - 0.04, 2) - f.x*f.x));
+  const hipY = Math.min(LEG.hip - crouch, reach(fL), reach(fR));
+  for(const [leg, f] of [[p.L, fL], [p.R, fR]]){
+    const [h, k] = legIK(f.x, LEG.ankle + f.lift - hipY); leg.hip.rotation.z = h; leg.knee.rotation.z = k;
+    if(leg.foot) leg.foot.rotation.z = -(h + k) + (f.lift > 0.02 ? -0.25*Math.sin(Math.PI*f.lift/0.32) : 0); }
+  B.position.y = hipY - LEG.hip;
+  p.gait = {ph:cyc*2*Math.PI, amp:run}; p.lean = -(aim ? 0.06 : 0.025) - 0.035*run;
 }
 /* ---------------- action animation ----------------
    The support (left) arm is solved every frame with simple two-bone IK from the shoulder to a hand target:
