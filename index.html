@@ -771,7 +771,7 @@ function unpackActs(arr, num){
       case 'b': out.push({k:'bang', x:num(q[1],0), y:num(q[2],0), fuse:clamp(num(q[3],1.5),0.5,5)}); break;
       case 'W': out.push({k:'wbang', byIdx:q[1]|0, d:clamp(num(q[2],0),-3,5)}); break;
       case 'D': out.push({k:'wdoor', key:String(q[1]||''), at:q[2]==='start'?'start':'half'}); break;
-      case 'L': out.push({k:'wloc', whoIdx:q[1]|0, seg:q[2]|0, f:clamp(num(q[3],0),0,1), d:clamp(num(q[4],0),-2,5), set:q[5]?1:0}); break;
+      case 'L': out.push({k:'wloc', whoIdx:q[1]|0, seg:q[2]|0, f:clamp(num(q[3],0),0,1), d:clamp(num(q[4],0),-10,5), set:q[5]?1:0}); break;
       case 'm': out.push({k:'mwith', whoIdx:q[1]|0, d:clamp(num(q[2],0.3),0,10)}); break;
       case 'r': out.push({k:'wsig', fromIdx:q[1]|0, s:SIGS[q[2]] ? q[2] : ''}); break;
       case 'd': out.push({k:'door', key:String(q[1]||''), how:q[2]==='kick'?'kick':'hand', name:q[3] ? gateName(q[3]) : ''}); break;
@@ -2210,7 +2210,7 @@ function actClick(act, v, ai){
     else if(act==='a-sweep') a.sw = +v;
     else if(act==='a-at') a.at = v;
     else if(act==='a-fuse') a.fuse = clamp(r2((a.fuse||1.5) + (+v)), 0.5, 5);
-    else if(act==='a-off') a.d = clamp(r2((a.d||0) + (+v)), a.k==='wloc' ? -2 : -3, 5);
+    else if(act==='a-off') a.d = clamp(r2((a.d||0) + (+v)), a.k==='wloc' ? -10 : -3, 5);
   }
   if(!acts.length) delete owner.acts;
   changed(); renderInspector();
@@ -3962,7 +3962,7 @@ function entryMove(it, from, kind){
 const buttonHook = (it, from) => entryMove(it, from, 'hook');
 
 /* ---- zipper: the whole stack through one doorway ---- */
-const ZIP_TEMPO = {d:['Deliberate', 4, 0.9], s:['Steady', 5.5, 0.45], x:['Dynamic', 7, 0.2]};   // name, ft/s, seconds each man steps off after the man ahead
+const ZIP_TEMPO = {d:['Deliberate', 4, 0.35], s:['Steady', 5.5, 0.1], x:['Dynamic', 7, 0]};   // name, ft/s, seconds between the man ahead clearing the threshold and the next man crossing it
 let zip = {first:'hook', tempo:'s', sectors:true, ids:[], from:null};
 try{ const v = JSON.parse(localStorage.getItem('cqb-zip') || 'null'); if(v){ zip.first = v.first==='cross' ? 'cross' : 'hook'; zip.tempo = ZIP_TEMPO[v.tempo] ? v.tempo : 's'; zip.sectors = v.sectors !== false; } }catch(e){}
 const tagNum = q => { const n = parseInt(q.l, 10); return isNaN(n) ? 99 : n; };
@@ -3996,7 +3996,7 @@ function renderZipper(){
   document.querySelectorAll('#zipper [data-zfirst]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.zfirst===zip.first)));
   document.querySelectorAll('#zipper [data-ztempo]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ztempo===zip.tempo)));
   $('#zip-sectors').checked = zip.sectors;
-  $('#zip-tempo-help').textContent = `${ZIP_TEMPO[zip.tempo][1]} ft/s. Each man steps off about ${ZIP_TEMPO[zip.tempo][2]} s after the man ahead, a little later wherever that’s needed to keep 2 ft between them.`;
+  $('#zip-tempo-help').textContent = `${ZIP_TEMPO[zip.tempo][1]} ft/s. Each man crosses the threshold ${ZIP_TEMPO[zip.tempo][2] ? 'about ' + ZIP_TEMPO[zip.tempo][2] + ' s after' : 'the moment'} the man ahead clears it, so nobody is in the room alone. If that would put two men within 2 ft, the second goes a touch later.`;
 }
 // room side for each man in order (alternating), and whether that makes his move a hook or a cross
 function zipPlan(st, men){
@@ -4033,26 +4033,43 @@ function buildZipper(){
     if(!deep) ep.pts.forEach(pt => { pt.look = sector; });
     insertMove(q, from, ep.pts, tempo[1]);
     const owner = from >= 0 ? q.path[from] : q;
-    // timing: everyone after #1 steps off a moment after the man ahead of him moves
-    if(prev){ owner.acts = (owner.acts || []).filter(a => a.k!=='wloc' && a.k!=='mwith'); owner.acts.push({k:'mwith', who:prev.q.id, d:tempo[2], zip:1}); }
+    // timing is set below, once every route exists: clear out old triggers that would hold him back
+    if(prev) owner.acts = (owner.acts || []).filter(a => a.k!=='wloc' && a.k!=='mwith');
     // after his corner, a short pause, then he turns to work his sector
     const lastW = q.path[q.path.length - 1];
     if(zip.sectors && lastW && deep){ const target = sector;
       lastW.acts = (lastW.acts || []).filter(a => !(a.k==='look' && a.zip)); lastW.acts.push({k:'wait', d:0.5}, {k:'look', x:r2(target.x), y:r2(target.y), d:0, sw:0, zip:1}); }
     prev = {q, from, thr:ep.thr, n:ep.pts.length};
   });
-  // spacing: if a man would come within 2 ft of anyone ahead of him while moving, he steps off a little later
+  // timing: each man crosses the threshold the moment the man ahead of him clears it (plus the tempo's gap).
+  // "Clears" = he's inside and at least 1.4 ft off the doorway. The next man steps off early enough to get there right then.
   changed();
-  const order = plan.map(pl => pl.m.q), CLEAR = 2.0/FT;
+  const order = plan.map(pl => pl.m.q), CLEAR = 2.0/FT, vOf = pt => o.h ? pt.y : pt.x;
+  const offDoor = pt => o.h ? distSeg(pt.x, pt.y, o.a0, o.line, o.a1, o.line) : distSeg(pt.x, pt.y, o.line, o.a0, o.line, o.a1);
+  const firstMove = q => { const m = sched().map.get(q.id); return m ? m.ph.find(x => x.k==='m' && x.t1 > 0) : null; };
+  const scan = (q, test) => { const m = sched().map.get(q.id); if(!m) return null; for(let t = 0; t <= m.end + 0.05; t += 1/60){ const ps = poseAt(q, t); if(test(ps)) return t; } return null; };
   for(let k=1;k<order.length;k++){
-    const q = order[k], from = plan[k].m.i, owner = from >= 0 ? q.path[from] : q, a = (owner.acts||[]).find(x => x.k==='mwith' && x.zip); if(!a) continue;
-    for(let tries=0; tries<30; tries++){
-      const sc = sched(), mine = sc.map.get(q.id); if(!mine || mine.stuck) break;
+    const q = order[k], pq = order[k-1], from = plan[k].m.i, owner = from >= 0 ? q.path[from] : q;
+    owner.acts = (owner.acts || []).filter(a => !(a.k==='wloc' && a.zip)); changed();
+    // when the man ahead clears the threshold, as a spot on his route
+    const tc = scan(pq, ps => (vOf(ps) - o.line)*side < -0.05 && offDoor(ps) >= 1.4/FT);
+    const mp = sched().map.get(pq.id);
+    let seg, f;
+    if(tc!=null){ const ph = mp.ph.find(x => x.k==='m' && tc >= x.t0 - 1e-6 && tc <= x.t1 + 1e-6); if(ph){ seg = ph.leg; f = r2(legFrac(ph, tc).s); } }
+    if(seg==null){ const last = (pq.path||[]).length - 1; seg = last; f = 1; }
+    // how long he takes from stepping off to crossing the door line, on his own
+    const mv = (sched().map.get(q.id)||{ph:[]}).ph.find(x => x.k==='m' && x.leg===from + 1) || firstMove(q), tx = scan(q, ps => (vOf(ps) - o.line)*side <= 0);
+    const lead = mv && tx!=null ? Math.max(0, tx - mv.t0) : 0;
+    const a = {k:'wloc', who:pq.id, seg, f, d:r2(tempo[2] - lead), set:1, zip:1};
+    owner.acts.push(a); changed();
+    // never closer than 2 ft to anyone ahead of him: if he would be, he goes a tenth of a second later until he isn't
+    for(let tries=0; tries<40; tries++){
+      const mine = sched().map.get(q.id); if(!mine || mine.stuck) break;
       const t0 = (mine.ph.find(x => x.k==='m') || {t0:0}).t0; let tooClose = false;
       for(let t=t0; t<=mine.end + 0.3 && !tooClose; t+=1/30){ const me = poseAt(q, t);
         for(let j=0;j<k;j++){ const o2 = poseAt(order[j], t); if(Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
       if(!tooClose) break;
-      a.d = r2((a.d||0) + 0.1); changed(); } }
+      a.d = r2(a.d + 0.1); changed(); } }
   try{ localStorage.setItem('cqb-zip', JSON.stringify({first:zip.first, tempo:zip.tempo, sectors:zip.sectors})); }catch(e){}
   $('#zipper').hidden = true; sel = {type:'item', id:it.id}; changed(); renderInspector(); setTime(0);
   toast(`Zipper built for ${men.length} men · press play. Undo puts their old moves back`);
