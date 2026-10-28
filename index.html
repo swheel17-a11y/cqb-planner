@@ -3968,8 +3968,11 @@ try{ const v = JSON.parse(localStorage.getItem('cqb-zip') || 'null'); if(v){ zip
 const tagNum = q => { const n = parseInt(q.l, 10); return isNaN(n) ? 99 : n; };
 // the last waypoint he reaches before the doorway (-1 = his start), on the given side of the door line
 function outsideIndex(q, o, side){
-  const vOf = p => o.h ? p.y : p.x; let idx = (vOf(q) - o.line)*side > 0 ? -1 : null;
-  (q.path || []).every((w, i) => { if((vOf(w) - o.line)*side > 0.05){ idx = i; return true; } return false; });
+  const vOf = p => o.h ? p.y : p.x, uOf = p => o.h ? p.x : p.y;
+  // a spot right in the doorway isn't a place in the stack: he'd be standing in the way of the men going in
+  const inDoorway = p => (vOf(p) - o.line)*side < 0.6 && uOf(p) > o.a0 - 0.25 && uOf(p) < o.a1 + 0.25;
+  let idx = (vOf(q) - o.line)*side > 0 ? -1 : null;
+  (q.path || []).every((w, i) => { if((vOf(w) - o.line)*side > 0.05){ if(!inDoorway(w)) idx = i; return true; } return false; });
   return idx;
 }
 function zipperCandidates(it, from){
@@ -4065,9 +4068,11 @@ function buildZipper(){
     // never closer than 2 ft to anyone ahead of him: if he would be, he goes a tenth of a second later until he isn't
     for(let tries=0; tries<40; tries++){
       const mine = sched().map.get(q.id); if(!mine || mine.stuck) break;
-      const t0 = (mine.ph.find(x => x.k==='m') || {t0:0}).t0; let tooClose = false;
-      for(let t=t0; t<=mine.end + 0.3 && !tooClose; t+=1/30){ const me = poseAt(q, t);
-        for(let j=0;j<k;j++){ const o2 = poseAt(order[j], t); if(Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
+      // only from when he leaves his spot in the stack, and only at the doorway or inside: a tight stack outside is normal
+      const leave = mine.ph.find(x => x.k==='m' && x.leg===from + 1), t0 = leave ? leave.t0 : 0; let tooClose = false;
+      const atDoor = pt => (vOf(pt) - o.line)*side < 0.45;
+      for(let t=t0; t<=mine.end + 0.3 && !tooClose; t+=1/30){ const me = poseAt(q, t); if(!atDoor(me)) continue;
+        for(let j=0;j<k;j++){ const o2 = poseAt(order[j], t); if(atDoor(o2) && Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
       if(!tooClose) break;
       a.d = r2(a.d + 0.1); changed(); } }
   try{ localStorage.setItem('cqb-zip', JSON.stringify({first:zip.first, tempo:zip.tempo, sectors:zip.sectors})); }catch(e){}
