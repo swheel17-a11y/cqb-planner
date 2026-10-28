@@ -2018,7 +2018,7 @@ function renderInspector(){
       ${stuckNote(it)}
       ${actsEditor(it, it, -1)}
       <div class="insp-row"><span class="lbl">Route</span><div class="row"><button class="btn ${tool==='path'?'on':''}" data-act="draw">${n?'Add to route':'Draw route'}</button>${n?'<button class="btn" data-act="wpfirst">Edit waypoints</button><button class="btn" data-act="rclear">Clear route</button>':''}</div></div>
-      <div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From the end of his route: pivots tight around the door frame on his side and digs his near corner. No sweep until you add one.</span></div>
+      <div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From the end of his route. To hook from a waypoint in the middle, tap that waypoint and use Button hook there. He pivots tight around the door frame on his side and digs his near corner; no sweep until you add one.</span></div>
       <div class="insp-actions"><button class="btn ${on?'on':''}" data-act="los">${on?'Hide':'Show'} what they see</button><button class="btn" data-act="eyes">Ride along</button><button class="btn danger" data-act="del">Delete</button></div>`;
     } else if(it.k==='label'){
       h = `<div class="insp-head">Label</div>
@@ -2042,7 +2042,7 @@ function renderInspector(){
     <div class="insp-row"><span class="lbl">Speed</span>${seg('sp', spOpts, spCur, 'sm')}</div>
     <div class="insp-row"><span class="lbl">Facing</span>${seg('facing', [['travel','Where he’s walking'],['point','Watch a point']], w.lx!=null ? 'point' : 'travel', 'sm')}<span class="small">${w.lx!=null ? 'Drag the eye to aim it. He turns to it on the way here and keeps watching it.' : 'Or drag the eye next to the waypoint.'}</span></div>
     ${actsEditor(it, w, sel.i)}
-    ${sel.i===n-1 ? `<div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From the end of his route: pivots tight around the door frame on his side and digs his near corner. No sweep until you add one.</span></div>` : ''}
+    ${`<div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}</div><span class="small">From this waypoint (put it within about 10 ft of the door, on his side): he pivots tight around the door frame on his side and digs his near corner. No sweep until you add one.</span></div>`}
     <div class="insp-actions"><button class="btn" data-act="wprev" aria-label="Previous waypoint">◀</button><button class="btn" data-act="wnext" aria-label="Next waypoint">▶</button><button class="btn" data-act="wjump">Jump to ${at} s</button><button class="btn" data-act="wperson">Person</button><button class="btn danger" data-act="del">Delete waypoint</button></div>`;
   } else if(sel.type==='step'){
     const st = getStep(sel.id); if(!st){ sel=null; insp.hidden=true; return; }
@@ -2087,7 +2087,7 @@ insp.addEventListener('click', e => {
   if(READONLY) return;
   if(act.startsWith('a-')){ actClick(act, v, +b.dataset.ai); return; }
   if(act==='bhug'){ bhHug = v; try{ localStorage.setItem('cqb-bh-hug', v); }catch(err){} renderInspector(); return; }
-  if(act==='bhook'){ const who = getItem(sel.id); if(who && (sel.type==='item' || sel.type==='wp')) buttonHook(who); return; }
+  if(act==='bhook'){ const who = getItem(sel.id); if(who && (sel.type==='item' || sel.type==='wp')) buttonHook(who, sel.type==='wp' ? sel.i : undefined); return; }
   if(sel.type==='item'){
     const it = getItem(sel.id); if(!it) return;
     if(act==='los'){ losId = losId===it.id ? null : it.id; drawPlan(); renderInspector(); if(T) T.dirty=true; return; }
@@ -3855,12 +3855,18 @@ function nearestDoorway(px, py, maxD){
     if(dd <= maxD && (!best || dd < best.d)) best = {k, d:dd}; }
   return best;
 }
-function buttonHook(it){
-  const path = it.path || [], last = path.length ? path[path.length-1] : {x:it.x, y:it.y}, sp = (path.length && path[path.length-1].sp) || 5;
-  const dw = nearestDoorway(last.x, last.y, 2.6);
-  if(!dw){ toast('Put the end of his route next to a doorway first (within about 8 ft)'); return false; }
-  const o = openingSpan(dw.k), mu = o.h ? last.x : last.y, mv = o.h ? last.y : last.x, side = Math.sign(mv - o.line);
-  if(!side){ toast('Move the end of his route off the doorway, to the side he’s coming from'); return false; }
+// from: the waypoint index to hook from (-1 = where he starts). The hook goes in right after it.
+function buttonHook(it, from){
+  const path = it.path || []; if(from==null) from = path.length - 1;
+  const last = from >= 0 ? path[from] : {x:it.x, y:it.y}, before = from > 0 ? path[from-1] : from===0 ? {x:it.x, y:it.y} : null;
+  const sp = (from >= 0 && path[from].sp) || 5;
+  const dw = nearestDoorway(last.x, last.y, 3.5);
+  if(!dw){ toast(from >= 0 ? 'This waypoint is too far from a doorway · put it within about 10 ft of the door, on the side he’s coming from' : 'He’s too far from a doorway · tap the waypoint next to the door, then Button hook'); return false; }
+  const o = openingSpan(dw.k), mu = o.h ? last.x : last.y, mv = o.h ? last.y : last.x;
+  // which side he comes from: where he's standing, or where he came from if he's right on the doorway line
+  let side = Math.abs(mv - o.line) > 0.12 ? Math.sign(mv - o.line) : 0;
+  if(!side && before){ const bv = o.h ? before.y : before.x; side = Math.sign(bv - o.line); }
+  if(!side){ toast('Move this waypoint off the doorway, to the side he’s coming from'); return false; }
   const P = (u, v) => o.h ? {x:u, y:v} : {x:v, y:u};
   // his jamb is the door frame on his side of the opening; t points from it across the doorway
   const J = mu <= (o.a0 + o.a1)/2 ? o.a0 : o.a1, t = J===o.a0 ? 1 : -1, r = BH_HUG[bhHug][1]/FT;
@@ -3881,10 +3887,13 @@ function buttonHook(it){
   // skip the first arc point if he's already standing on it
   if(Math.hypot(pts[0].x - last.x, pts[0].y - last.y) < 0.12) pts.shift();
   checkpoint(); if(!it.path) it.path = [];
-  for(const q of pts) it.path.push({x:r2(q.x), y:r2(q.y), sp, w:0, go:'', g:null, lx:r2(q.look.x), ly:r2(q.look.y)});
-  sel = {type:'wp', id:it.id, i:it.path.length-1}; changed(); renderInspector();
+  const k = pts.length, later = it.path.length - (from + 1);
+  for(const a of routeAnchors(it)) if(a.seg >= from + 1) a.seg += k;   // notes and "move when he reaches" pins further along stay on their legs
+  it.path.splice(from + 1, 0, ...pts.map(q => ({x:r2(q.x), y:r2(q.y), sp, w:0, go:'', g:null, lx:r2(q.look.x), ly:r2(q.look.y)})));
+  sel = {type:'wp', id:it.id, i:from + k}; changed(); renderInspector();
   const e = S.edges.get(dw.k);
-  toast(e && e.t==='d' && !(e.a===-1 || e.a > 60) ? 'Button hook added · the door is closed, so give someone an Open door before he goes' : 'Button hook added · he digs his corner. Add a look or sweep at the last point once it’s clear');
+  toast(later > 0 ? `Button hook added after this waypoint · ${later===1 ? 'his next waypoint still follows it, so delete it if he no longer needs it' : `his ${later} later waypoints still follow it, so delete any he no longer needs`}`
+    : e && e.t==='d' && !(e.a===-1 || e.a > 60) ? 'Button hook added · the door is closed, so give someone an Open door before he goes' : 'Button hook added · he digs his corner. Add a look or sweep at the last point once it’s clear');
   return true;
 }
 
