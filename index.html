@@ -350,6 +350,8 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
       <button class="chip cones" id="btn-routes" aria-pressed="true" title="Show or hide routes, waypoints and look lines">Routes</button>
       <button class="chip cones" id="btn-cones" aria-pressed="true" title="Show where each person is looking">View cones</button>
       <button class="chip" id="btn-threat" aria-pressed="false" title="Shade what every hostile can see">Threat view</button>
+      <button class="chip" id="btn-dead" aria-pressed="true" title="Shade floor no friendly has looked at yet">Dead space</button>
+      <button class="chip" id="btn-deadfix" hidden title="Add moves so a friendly looks into each patch of dead space">Clear dead space</button>
       <button class="chip cam" id="btn-camkey" hidden title="Save what the camera shows now as a key at this time">＋ Camera key</button>
       <button class="chip cones" id="btn-drone" aria-pressed="false" hidden title="Drone camera that follows the team">Drone view</button>
       <button class="chip" id="btn-camlist" hidden>Camera…</button>
@@ -667,10 +669,10 @@ const GO = ['A','B','C'];
 const SIGS = {nod:'Nod', tri:'Tricep squeeze', sho:'Shoulder squeeze', thumb:'Thumbs up', point:'Point', call:'Verbal call', wig:'Gun wiggle', hr:'High ready', lr:'Low ready'};
 // gun posture shown for a moment by a signal: high ready, low ready, or the wiggle
 // what a signal looks like on the plan (the hand signals above plus the flashbang drill's own gestures)
-const SIG_LABEL = {...SIGS, bcall:'Bang call', fist:'Fist up · waiting', bgot:'Signal received', bprep:'Prepping bang', bang:'Bang out'};
+const SIG_LABEL = {...SIGS, clear:'Clear!', bcall:'Bang call', fist:'Fist up · waiting', bgot:'Signal received', bprep:'Prepping bang', bang:'Bang out'};
 const BCALL = {pump:1.5, got:0.6, prep:0.9};   // fist pumps x3; hand on his fist; bang off the kit and ready
 const sigGun = sig => !sig ? null : sig.s==='hr' ? 1 : sig.s==='lr' ? 0 : sig.s==='wig' ? 3 : null;
-const ACT_NAMES = {look:'Look at', gun:'Gun', wait:'Wait', door:'Open door', wdoor:'Wait for door', mwith:'Move with', wloc:'Move when he reaches…', bcall:'Call for a bang', btake:'Take the bang call', bang:'Throw flashbang', wbang:'Move on bang', sig:'Signal', wsig:'Wait for signal', open:'Open gate', gate:'Wait for gate', sync:'Sync'};
+const ACT_NAMES = {look:'Look at', gun:'Gun', wait:'Wait', door:'Open door', wdoor:'Wait for door', mwith:'Move with', wloc:'Move when he reaches…', clear:'Call clear', bcall:'Call for a bang', btake:'Take the bang call', bang:'Throw flashbang', wbang:'Move on bang', sig:'Signal', wsig:'Wait for signal', open:'Open gate', gate:'Wait for gate', sync:'Sync'};
 const CONE_DEG = 100, CONE_LEN = 7;          // view cone width and reach (squares)
 
 const ICON = {
@@ -771,6 +773,7 @@ function packActs(acts){
       case 'wdoor': return ['D', a.key||'', a.at||'half'];
       case 'bang': return ['b', r2(a.x), r2(a.y), r2(a.fuse||1.5), a.hook?1:0];
       case 'bcall': return ['C', a.to ? S.items.findIndex(i => i.id===a.to) : -1];
+      case 'clear': return ['Z'];
       case 'btake': return ['T', a.from ? S.items.findIndex(i => i.id===a.from) : -1, a.how==='nod' ? 'nod' : 'hand'];
       case 'wbang': return ['W', a.by ? S.items.findIndex(i => i.id===a.by) : -1, r2(a.d||0)];
       case 'wloc': return ['L', a.who ? S.items.findIndex(i => i.id===a.who) : -1, a.seg|0, r2(a.f||0), r2(a.d||0), a.set?1:0];
@@ -808,6 +811,7 @@ function unpackActs(arr, num){
       case 'w': out.push({k:'wait', d:clamp(num(q[1],0),0,600)}); break;
       case 'b': out.push({k:'bang', x:num(q[1],0), y:num(q[2],0), fuse:clamp(num(q[3],1.5),0.5,5), hook:q[4]?1:0}); break;
       case 'C': out.push({k:'bcall', toIdx:q[1]|0}); break;
+      case 'Z': out.push({k:'clear'}); break;
       case 'T': out.push({k:'btake', fromIdx:q[1]|0, how:q[2]==='nod' ? 'nod' : 'hand'}); break;
       case 'W': out.push({k:'wbang', byIdx:q[1]|0, d:clamp(num(q[2],0),-3,5)}); break;
       case 'D': out.push({k:'wdoor', key:String(q[1]||''), at:q[2]==='start'?'start':'half'}); break;
@@ -1096,6 +1100,7 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
         const mv = m.ph.find(q => q.k==='m' && q.t1 > t + 0.02);
         if(!mv){ stuck = `${who ? tagOf(who) : 'his teammate'} to move, but he never moves again`; return false; }
         hold(Math.max(t, mv.t0) + (a.d||0) - t); }
+      else if(a.k==='clear'){ sigs.push({t0:t, t1:t + 1.0, s:'clear'}); hold(1.0); }   // "Clear!": the room is done; detaining can start
       else if(a.k==='bcall'){   // flashbang call: arm up, opens and closes his fist three times
         const who = a.to && S.items.find(i => i.id===a.to);
         sigs.push({t0:t, t1:t + BCALL.pump, s:'bcall', to:a.to || null}); hold(BCALL.pump);
@@ -1416,28 +1421,49 @@ let SIM = null, SIMver = -1;
 function sim(){ if(SIM && SIMver===ver) return SIM; SIMver = ver; SIM = runSim(); return SIM; }
 function runSim(){
   const sc = sched(), dt = ENG.dt, people = S.items.filter(isPerson), FR = people.filter(q => q.k==='f'), HO = people.filter(q => q.k==='h'), CV = people.filter(q => q.k==='c');
-  const out = {down:new Map(), det:new Map(), dpath:new Map(), face:new Map(), lock:new Map(), shots:[], call:null, end:0, n:0};
+  const out = {down:new Map(), det:new Map(), dpath:new Map(), face:new Map(), lock:new Map(), shots:[], rounds:[], collat:[], call:null, end:0, n:0};
   if(!FR.length || (!HO.length && !CV.length)) return out;
+  // "Clear" is called by the user (the Call clear action); detaining waits for it
+  for(const f of FR){ const m = sc.map.get(f.id); if(!m) continue; for(const g of m.sigs) if(g.s==='clear' && (!out.call || g.t0 < out.call.t)) out.call = {t:g.t0, by:f.id}; }
   const horizon = sc.end + 25, n = Math.ceil(horizon/dt) + 1; out.n = n;
   // when each friendly is done with his own moves (free to look around)
   const freeT = new Map(FR.map(q => { const m = sc.map.get(q.id), mv = m ? m.ph.filter(p => p.k==='m' && !p.wander) : []; return [q.id, mv.length ? mv[mv.length-1].t1 : 0]; }));
   const face = new Map(FR.map(q => [q.id, new Float32Array(n)])), lock = new Map(FR.map(q => [q.id, new Uint8Array(n)]));
+  // bad guys: which way they face and whether they're aiming, once they've seen a friendly
+  const hface = new Map(HO.map(q => [q.id, new Float32Array(n)])), hlock = new Map(HO.map(q => [q.id, new Uint8Array(n)])), hcur = new Map(HO.map(q => [q.id, poseBase(q, 0).r])), htarget = new Map(), hseen = new Map();
   const cur = new Map(FR.map(q => [q.id, poseBase(q, 0).r])), target = new Map(), seen = new Map(), busy = new Map();
   const posOf = (q, t) => {   // where someone is at t, given what's happened so far
-    if(q.k==='h' && out.down.has(q.id) && t >= out.down.get(q.id)) return poseBase(q, out.down.get(q.id));
+    if(out.down.has(q.id) && t >= out.down.get(q.id)) return poseBase(q, out.down.get(q.id));
     if(q.k==='c' && out.det.has(q.id) && t >= out.det.get(q.id).t0) return poseBase(q, out.det.get(q.id).t0);
     const dp = q.k==='f' && out.dpath.get(q.id);
     if(dp){ const a = dp.filter(s => t >= s.t0).pop(); if(a){ const f = clamp((t - a.t0)/Math.max(1e-6, a.t1 - a.t0), 0, 1); return {...poseBase(q, t), x:a.ax + (a.bx-a.ax)*f, y:a.ay + (a.by-a.ay)*f}; } }
     return poseBase(q, t); };
   const alive = (h, t) => !(out.down.has(h.id) && t >= out.down.get(h.id));
-  const free = (c, t) => !(out.det.has(c.id) && t >= out.det.get(c.id).t0);
+  const free = (c, t) => !(out.det.has(c.id) && t >= out.det.get(c.id).t0) && alive(c, t);
+  // a round keeps going past the bad guy: through up to 3 walls, doors or pieces of furniture, about 50 ft at most.
+  // Anyone it reaches (civilian, teammate, another bad guy) is hit. Returns the path and who it hit.
+  const roundOn = (sh, me, hp, t, P) => {
+    const dx = hp.x - me.x, dy = hp.y - me.y, L = Math.hypot(dx, dy) || 1e-6, ux = dx/L, uy = dy/L, far = L + 50/FT, ex = me.x + ux*far, ey = me.y + uy*far;
+    const ev = [];
+    const segs = bangBlockers(t).map((g, k) => [...g, 'o'+k]); for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h >= 5) continue; const c = rectCorners(it); for(let i=0;i<4;i++){ const a = c[i], b = c[(i+1)%4]; segs.push([a[0], a[1], b[0], b[1], it.id]); } }
+    for(const g of segs){ const sx = ex-hp.x, sy = ey-hp.y, gx = g[2]-g[0], gy = g[3]-g[1], den = sx*gy - sy*gx; if(Math.abs(den) < 1e-9) continue;
+      const qx = g[0]-hp.x, qy = g[1]-hp.y, a = (qx*gy - qy*gx)/den, u = (qx*sy - qy*sx)/den; if(a > 1e-4 && a <= 1 && u >= 0 && u <= 1) ev.push({s:a, kind:'o', id:g[4]}); }
+    for(const q of people){ if(q===sh || P.get(q.id)===hp) continue; if(out.down.has(q.id) && t >= out.down.get(q.id)) continue; const o = P.get(q.id);
+      const a = ((o.x-hp.x)*(ex-hp.x) + (o.y-hp.y)*(ey-hp.y))/((ex-hp.x)**2 + (ey-hp.y)**2); if(a <= 0.003 || a > 1) continue;
+      if(distSeg(o.x, o.y, hp.x, hp.y, ex, ey) < 0.75/FT) ev.push({s:a, kind:'p', q}); }
+    ev.sort((p, q) => p.s - q.s); const passed = new Set(); let stop = 1, hit = null;
+    let lastS = -1;   // two wall pieces meeting where the round crosses are one wall
+    for(const e of ev){ if(e.kind==='o'){ if(passed.has(e.id) || Math.abs(e.s - lastS)*far < 0.05) continue; passed.add(e.id); lastS = e.s; if(passed.size > 3){ stop = e.s; break; } } else { hit = e.q; stop = e.s; break; } }
+    const walls = [...passed].length - (stop < 1 && !hit ? 1 : 0);
+    return {x:hp.x + (ex-hp.x)*stop, y:hp.y + (ey-hp.y)*stop, hit, walls:Math.max(0, walls)}; };
   let allDown = HO.length ? Infinity : 0, last = 0;
   for(let i=0;i<n;i++){ const t = i*dt, segs = bangBlockers(t), P = new Map(people.map(q => [q.id, posOf(q, t)]));
     const sees = (a, b) => !firstHit(a.x, a.y, b.x, b.y, segs).hit;
     const angTo2 = (a, b) => deg(Math.atan2(b.y - a.y, b.x - a.x));
     const inCone = (a, facing, b, range) => Math.hypot(b.x-a.x, b.y-a.y) <= range && Math.abs(angDiff(facing, angTo2(a, b))) <= CONE_DEG/2;
     const lineClear = (sh, a, b) => { for(const q of people){ if(q===sh || q.k==='h') continue; const o = P.get(q.id); if(distSeg(o.x, o.y, a.x, a.y, b.x, b.y) < ENG.ffR) return false; } return true; };
-    for(const f of FR){ const me = P.get(f.id), base = poseBase(f, t).r, isFree = t >= freeT.get(f.id), job = busy.get(f.id);
+    for(const f of FR){ if(!alive(f, t)){ face.get(f.id)[i] = face.get(f.id)[Math.max(0, i-1)]; continue; }
+      const me = P.get(f.id), base = poseBase(f, t).r, isFree = t >= freeT.get(f.id), job = busy.get(f.id);
       let want = null, kind = 0;
       // 1. a bad guy: keep tracking the one he's on, or pick up the nearest one in his cone
       let tg = target.get(f.id); if(tg && !(tg.k==='h' && alive(tg, t) && sees(me, P.get(tg.id)) && Math.hypot(P.get(tg.id).x-me.x, P.get(tg.id).y-me.y) <= ENG.range)) tg = null;
@@ -1460,17 +1486,36 @@ function runSim(){
         if(!out.down.has(tg.id) && t - seen.get(key) >= ENG.react && Math.abs(angDiff(r, angTo2(me, hp))) <= ENG.aimTol && lineClear(f, me, hp)){
           out.shots.push({by:f.id, at:tg.id, t, x0:me.x, y0:me.y, x1:hp.x, y1:hp.y}, {by:f.id, at:tg.id, t:t + ENG.pair, x0:me.x, y0:me.y, x1:hp.x, y1:hp.y});
           out.down.set(tg.id, t + 0.05); last = Math.max(last, t + 1.2);
+          for(const tt of [t, t + ENG.pair]){ const rd = roundOn(f, me, hp, tt, P); out.rounds.push({by:f.id, at:tg.id, t:tt, x0:me.x, y0:me.y, x1:hp.x, y1:hp.y, x2:rd.x, y2:rd.y, hit:rd.hit ? rd.hit.id : null, walls:rd.walls});
+            if(rd.hit && !(out.down.has(rd.hit.id) && out.down.get(rd.hit.id) <= tt + 0.05)){ out.down.set(rd.hit.id, tt + 0.05); out.collat.push({t:tt, by:f.id, hit:rd.hit.id, walls:rd.walls, x:rd.x, y:rd.y}); } }
           if(HO.every(h => out.down.has(h.id))) allDown = Math.max(...HO.map(h => out.down.get(h.id))); } }
       else for(const k of [...seen.keys()]) if(k.startsWith(f.id+'>')) seen.delete(k);
     }
+    // bad guys shoot back: a friendly in front of one, in his line of sight, gets shot 0.3 s after he's seen him,
+    // once his muzzle is on. A flashed bad guy doesn't shoot (or pick anyone up) until it wears off.
+    for(const h of HO){ const hf = hface.get(h.id);
+      if(!alive(h, t)){ hf[i] = hcur.get(h.id); continue; }
+      const me = P.get(h.id), base = poseBase(h, t).r, stun = stunnedAt(h, t); let r = hcur.get(h.id), tg = htarget.get(h.id);
+      if(tg && !(alive(tg, t) && sees(me, P.get(tg.id)) && Math.hypot(P.get(tg.id).x-me.x, P.get(tg.id).y-me.y) <= ENG.range)) tg = null;
+      if(stun) tg = null;
+      else if(!tg){ let bd = 1e9; for(const f of FR){ if(!alive(f, t)) continue; const fp = P.get(f.id); if(!inCone(me, r, fp, ENG.range) || !sees(me, fp)) continue; const d = Math.hypot(fp.x-me.x, fp.y-me.y); if(d < bd){ bd = d; tg = f; } } }
+      htarget.set(h.id, tg || null);
+      const goal = tg ? angTo2(me, P.get(tg.id)) : base, step = TURN_RATE*dt, dd = angDiff(r, goal);
+      r = Math.abs(dd) <= step ? goal : (r + Math.sign(dd)*step + 360) % 360; hcur.set(h.id, r); hf[i] = r; hlock.get(h.id)[i] = tg ? 1 : 0;
+      if(tg){ const key = h.id+'>'+tg.id; if(!hseen.has(key)) hseen.set(key, t); const fp = P.get(tg.id);
+        if(!out.down.has(tg.id) && t - hseen.get(key) >= ENG.react && Math.abs(angDiff(r, angTo2(me, fp))) <= ENG.aimTol){
+          out.shots.push({by:h.id, at:tg.id, t, x0:me.x, y0:me.y, x1:fp.x, y1:fp.y}, {by:h.id, at:tg.id, t:t + ENG.pair, x0:me.x, y0:me.y, x1:fp.x, y1:fp.y});
+          out.down.set(tg.id, t + 0.05); out.collat.push({t, by:h.id, hit:tg.id, walls:0, x:fp.x, y:fp.y, hostile:true}); last = Math.max(last, t + 1.2);
+          for(const tt of [t, t + ENG.pair]){ const rd = roundOn(h, me, fp, tt, P); out.rounds.push({by:h.id, at:tg.id, t:tt, x0:me.x, y0:me.y, x1:fp.x, y1:fp.y, x2:rd.x, y2:rd.y, hit:rd.hit ? rd.hit.id : null, walls:rd.walls});
+            if(rd.hit && !(out.down.has(rd.hit.id) && out.down.get(rd.hit.id) <= tt + 0.05)){ out.down.set(rd.hit.id, tt + 0.05); out.collat.push({t:tt, by:h.id, hit:rd.hit.id, walls:rd.walls, x:rd.x, y:rd.y}); } } } }
+      else for(const k of [...hseen.keys()]) if(k.startsWith(h.id+'>')) hseen.delete(k);
+    }
     // all bad guys down: the room is safe to detain
     if(t >= allDown && CV.length){
-      if(!out.call){ for(const f of FR){ if(t < freeT.get(f.id)) continue; const me = P.get(f.id);
-          if(CV.some(c => free(c, t) && sees(me, P.get(c.id)) && Math.hypot(P.get(c.id).x-me.x, P.get(c.id).y-me.y) <= ENG.coverRange)){ out.call = {t, by:f.id}; last = Math.max(last, t + ENG.call); break; } } }
       if(out.call && t >= out.call.t + ENG.call){
-        for(const c of CV){ if(out.det.has(c.id)) continue; const cp = P.get(c.id);
+        for(const c of CV){ if(out.det.has(c.id) || !alive(c, t)) continue; const cp = P.get(c.id);
           let best = null, bd = 1e9;
-          for(const f of FR){ if(t < freeT.get(f.id)) continue; const job = busy.get(f.id); if(job && t < job.done) continue; const me = P.get(f.id), d = Math.hypot(cp.x-me.x, cp.y-me.y);
+          for(const f of FR){ if(t < freeT.get(f.id) || !alive(f, t)) continue; const job = busy.get(f.id); if(job && t < job.done) continue; const me = P.get(f.id), d = Math.hypot(cp.x-me.x, cp.y-me.y);
             if(d > ENG.coverRange || !sees(me, cp)) continue; if(d < bd){ bd = d; best = f; } }
           if(!best) continue;
           // he walks up to about 3 ft (a spot he can actually get to, clear of everyone else), orders him down,
@@ -1492,15 +1537,111 @@ function runSim(){
           out.det.set(c.id, {t0:t, tk, tb:tk + ENG.kneel, tc:t3, tcuff:t4, by:best.id, face:(deg(Math.atan2(cp.y-spot.y, cp.x-spot.x)) + 360) % 360});
           busy.set(best.id, {c, t0:t, done:t4}); last = Math.max(last, t4 + 1.5); } }
     }
-    if(t > sc.end + 2 && t > last && (allDown <= t || !HO.some(h => alive(h, t))) && CV.every(c => out.det.has(c.id))) { out.n = i + 1; break; }
+    if(t > sc.end + 2 && t > last && (allDown <= t || !HO.some(h => alive(h, t))) && (!out.call || CV.every(c => out.det.has(c.id) || !alive(c, t)))) { out.n = i + 1; break; }
   }
-  out.face = face; out.lock = lock; out.end = last; return out;
+  out.face = face; out.lock = lock; out.hface = hface; out.hlock = hlock; out.end = last; return out;
+}
+/* ---------------- standing on furniture ----------------
+   Put someone on a desk, table, counter, crate, couch, bed, low wall or barrels (anything 4 ft tall or less) and he
+   stands on top of it: raised in 3D, marked on the plan. A bad guy up on a desk in the corner, for instance. */
+const CLIMB_MAX = 4;
+function standOn(x, y){ let best = null; for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h > CLIMB_MAX || !inRect(it, x, y, 0)) continue; if(!best || f.h > FURN[best.k].h) best = it; } return best; }
+/* ---------------- dead space ----------------
+   A room the team finishes in isn't clear until every part of its floor has been inside a friendly's view cone: in his
+   line of sight and within the cone's reach. Furniture of any height hides the floor behind it. Swept up to the moment
+   someone calls "Clear" (or the end of the plan if nobody does). */
+let DZ = null, DZver = -1, deadOn = true;
+function sweepSegs(t){ const segs = bangBlockers(t).slice(); for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h >= 5) continue; const c = rectCorners(it); for(let i=0;i<4;i++){ const a = c[i], b = c[(i+1)%4]; segs.push([a[0], a[1], b[0], b[1]]); } } return segs; }
+function roomIds(){
+  const W = S.cols, H = S.rows, id = new Int32Array(W*H).fill(-1), size = []; let nr = 0;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ if(id[y*W+x] >= 0) continue; const st = [[x,y]]; id[y*W+x] = nr; let n = 0;
+    while(st.length){ const [cx, cy] = st.pop(); n++;
+      for(const [nx, ny, d, ex, ey] of [[cx+1,cy,'v',cx+1,cy],[cx-1,cy,'v',cx,cy],[cx,cy+1,'h',cx,cy+1],[cx,cy-1,'h',cx,cy]]){
+        if(nx < 0 || ny < 0 || nx >= W || ny >= H || id[ny*W+nx] >= 0 || S.edges.has(ekey(d,ex,ey))) continue; id[ny*W+nx] = nr; st.push([nx, ny]); } }
+    size.push(n); nr++; }
+  return {id, size, at:(x, y) => { const cx = Math.floor(x), cy = Math.floor(y); return cx < 0 || cy < 0 || cx >= W || cy >= H ? -1 : id[cy*W+cx]; }};
+}
+function deadSpace(){
+  if(DZ && DZver===ver) return DZ; DZver = ver;
+  const sc = sched(), M = sim(), FR = S.items.filter(q => q.k==='f');
+  DZ = {pts:[], clusters:[], until:0, rooms:null};
+  if(!FR.length) return DZ;
+  const until = M.call ? M.call.t : Math.max(sc.end, M.end) + 1, R = roomIds(); DZ.until = until; DZ.rooms = R;
+  // the rooms (walled all round) the team finishes in. Only if nobody finishes inside one does an open area count,
+  // out to a cone's reach from where they end up (a hall boss left out in an open hallway doesn't make it count).
+  const rooms = new Set(), ends = FR.map(f => poseAt(f, until)).filter(ps => !ps.down);
+  for(const ps of ends){ const r = R.at(ps.x, ps.y); if(r >= 0 && R.size[r] <= 150) rooms.add(r); }
+  if(!rooms.size) for(const ps of ends){ const r = R.at(ps.x, ps.y); if(r >= 0) rooms.add(r); }
+  const furn = S.items.filter(it => FURN[it.k]);
+  for(let y=0;y<S.rows;y++) for(let x=0;x<S.cols;x++){ const rid = R.id[y*S.cols+x]; if(!rooms.has(rid)) continue;
+    if(R.size[rid] > 150 && !ends.some(ps => Math.hypot(ps.x - (x+0.5), ps.y - (y+0.5)) <= CONE_LEN)) continue;
+    for(const ox of [0.25, 0.75]) for(const oy of [0.25, 0.75]){ const px = x+ox, py = y+oy; if(furn.some(it => inRect(it, px, py, 0.03))) continue; DZ.pts.push({x:px, y:py, at:Infinity, room:R.id[y*S.cols+x]}); } }
+  if(!DZ.pts.length) return DZ;
+  let open = DZ.pts.slice();
+  for(let t = 0; t <= until + 1e-6 && open.length; t += 0.1){ const segs = sweepSegs(t);
+    for(const f of FR){ const ps = poseAt(f, t); if(ps.down) continue; const a = ps.r;
+      open = open.filter(q => { const dx = q.x-ps.x, dy = q.y-ps.y, d = Math.hypot(dx, dy); if(d > CONE_LEN || Math.abs(angDiff(a, deg(Math.atan2(dy, dx)))) > CONE_DEG/2) return true;
+        if(firstHit(ps.x, ps.y, q.x, q.y, segs).hit) return true; q.at = t; return false; }); } }
+  // spots never swept, grouped into patches
+  const left = DZ.pts.filter(q => q.at===Infinity), seen = new Set();
+  for(const q of left){ if(seen.has(q)) continue; const cl = [q], st = [q]; seen.add(q);
+    while(st.length){ const a = st.pop(); for(const b of left){ if(seen.has(b) || b.room!==a.room || Math.abs(a.x-b.x) > 0.55 || Math.abs(a.y-b.y) > 0.55) continue; seen.add(b); cl.push(b); st.push(b); } }
+    const cx = cl.reduce((s, p) => s + p.x, 0)/cl.length, cy = cl.reduce((s, p) => s + p.y, 0)/cl.length; DZ.clusters.push({pts:cl, x:cx, y:cy, room:q.room}); }
+  DZ.clusters.sort((a, b) => b.pts.length - a.pts.length);
+  return DZ;
+}
+// for drawing: the last result straight away, worked out again a moment after the plan stops changing (keeps dragging smooth)
+let dzTimer = 0;
+function deadSpaceSoon(){ if(DZ && DZver===ver) return DZ; clearTimeout(dzTimer); dzTimer = setTimeout(() => { deadSpace(); drawPlan(); }, 250); return DZ || {pts:[], clusters:[]}; }
+// what's wrong with calling "Clear" when this man does
+function clearWarn(it){ const M = sim(), out = []; if(!M.call || M.call.by!==it.id) return out;
+  const D = deadSpace(); if(D.clusters.length) out.push(`${D.clusters.length===1 ? 'One patch' : D.clusters.length + ' patches'} of dead space ${D.clusters.length===1 ? 'hasn’t' : 'haven’t'} been looked at yet.`);
+  const up = S.items.filter(q => q.k==='h' && !(M.down.has(q.id) && M.down.get(q.id) <= M.call.t)); if(up.length) out.push(`${up.length===1 ? 'A bad guy is' : up.length + ' bad guys are'} still up when he calls it.`);
+  return out; }
+// adds moves so someone looks into each patch of dead space: the nearest free friendly walks (straight, nothing in the
+// way) to a spot in the same room where the whole patch is in front of him and in sight, faces it, and holds a moment
+function fixDeadSpace(){
+  const D0 = deadSpace(); if(!D0.clusters.length){ toast('No dead space left: every part of the room has been seen'); return; }
+  checkpoint(); let added = 0; const skip = new Set();
+  for(let guard = 0; guard < 10; guard++){ ver++; const D = deadSpace(), cl = D.clusters.find(c => !skip.has(Math.round(c.x*4)+','+Math.round(c.y*4))); if(!cl) break;
+    const key = Math.round(cl.x*4)+','+Math.round(cl.y*4), R = D.rooms, until = D.until, segs = sweepSegs(until), M = sim();
+    const others = S.items.filter(isPerson).map(q => ({q, p:poseAt(q, until)}));
+    let best = null;
+    for(const f of S.items.filter(q => q.k==='f')){ if(M.down.has(f.id)) continue; const end = f.path && f.path.length ? f.path[f.path.length-1] : f;
+      for(const rr of [1, 1.5, 2, 2.5, 3, 4, 5]) for(let k=0;k<16;k++){ const a = k*Math.PI/8, c = {x:cl.x + Math.cos(a)*rr, y:cl.y + Math.sin(a)*rr};
+        if(R.at(c.x, c.y)!==cl.room) continue; const [ox, oy] = offWalls(c.x, c.y); if(Math.hypot(ox-c.x, oy-c.y) > 1e-3) continue;
+        if(S.items.some(it => FURN[it.k] && inRect(it, c.x, c.y, 0.25))) continue;
+        if(others.some(o => o.q!==f && Math.hypot(o.p.x-c.x, o.p.y-c.y) < 2/FT)) continue;
+        // what he'd see from there, facing the middle of the patch: a long patch may take more than one look
+        const face = deg(Math.atan2(cl.y-c.y, cl.x-c.x)), sees = cl.pts.filter(q => { const d = Math.hypot(q.x-c.x, q.y-c.y); return d <= CONE_LEN - 0.3 && Math.abs(angDiff(face, deg(Math.atan2(q.y-c.y, q.x-c.x)))) <= CONE_DEG/2 - 3 && !firstHit(c.x, c.y, q.x, q.y, segs).hit; });
+        if(sees.length < Math.min(3, cl.pts.length)) continue;
+        if(legBlock({x:end.x, y:end.y}, c)) continue;
+        const cost = Math.hypot(c.x-end.x, c.y-end.y), score = sees.length - 1.5*cost; if(!best || score > best.score) best = {f, c, cost, score}; } }
+    if(!best){ skip.add(key); continue; }
+    const f = best.f; if(!f.path) f.path = [];
+    const last = f.path[f.path.length-1], move = {x:r2(best.c.x), y:r2(best.c.y), sp:3, w:0, go:'', g:null, lx:r2(cl.x), ly:r2(cl.y), acts:[{k:'wait', d:0.6}]};
+    // his "Clear" call, if it was at the end of his route, moves to after the new look
+    if(last && last.acts && last.acts.some(a => a.k==='clear')){ last.acts = last.acts.filter(a => a.k!=='clear'); move.acts.push({k:'clear'}); if(!last.acts.length) delete last.acts; }
+    else if(!last && f.acts && f.acts.some(a => a.k==='clear')){ f.acts = f.acts.filter(a => a.k!=='clear'); move.acts.push({k:'clear'}); }
+    f.path.push(move); added++;
+    // whoever calls "Clear" waits until this look is done
+    const leg = f.path.length - 1;
+    for(const q of S.items){ if(q.k!=='f' || q===f) continue;
+      for(const list of [q.acts, ...(q.path||[]).map(w => w.acts)]){ if(!list) continue; const ci = list.findIndex(a => a.k==='clear'); if(ci < 0) continue;
+        list.splice(ci, 0, {k:'wloc', who:f.id, seg:leg, f:1, d:0.6, set:1}); } }
+    // a look that didn't shrink the patch isn't worth another try
+    ver++; const after = deadSpace().clusters.find(c => Math.round(c.x*4)+','+Math.round(c.y*4)===key); if(after && after.pts.length >= cl.pts.length) skip.add(key); }
+  changed(); renderInspector(); const left = deadSpace().clusters.length;
+  toast(added ? `Added ${added===1 ? 'a move' : added + ' moves'} to look into the dead space${left ? ` · ${left} patch${left>1?'es':''} still can’t be reached from where the team ends up` : ''}. Undo takes ${added===1 ? 'it' : 'them'} back` : 'Couldn’t find a spot to see that dead space from. Add a move by hand');
 }
 function poseAt(it, t){
   const p = poseBase(it, t); if(!isPerson(it)) return p;
   const M = sim(); if(!M.n){ if(it.k!=='f' && stunnedAt(it, t)){ p.stun = true; if(it.k==='h') p.g = 0; } return p; }
-  if(it.k==='h'){ const td = M.down.get(it.id); if(td!=null && t >= td){ const q = poseBase(it, td); q.down = clamp((t - td)/0.45, 0, 1); q.v = 0; q.moving = false; q.sig = null; return q; }
-    if(stunnedAt(it, t)){ p.stun = true; p.g = 0; } return p; }
+  { const td = M.down.get(it.id); if(td!=null && t >= td){ const q = poseBase(it, td); q.down = clamp((t - td)/0.45, 0, 1); q.v = 0; q.moving = false; q.sig = null; q.hit = M.collat.find(c => c.hit===it.id) || null; return q; } }
+  if(it.k==='h'){
+    if(stunnedAt(it, t)){ p.stun = true; p.g = 0; return p; }
+    const hf = M.hface && M.hface.get(it.id); if(hf && t < M.n*ENG.dt){ const i = clamp(Math.round(t/ENG.dt), 0, M.n - 1); p.r = hf[i]; if(M.hlock.get(it.id)[i]) p.g = 2; }
+    return p; }
   if(it.k==='c'){ const d = M.det.get(it.id); if(d && t >= d.t0){ const q = poseBase(it, d.t0), by = getItem(d.by), bp = by ? poseBase(by, t) : null;
       // hands up and facing the man giving the commands; once told to kneel he turns away from him
       if(t < d.tk - 0.3){ const dp = M.dpath.get(d.by), seg = dp && dp.filter(s => s.t0 <= t).pop(); const fx = seg ? seg.ax + (seg.bx-seg.ax)*clamp((t-seg.t0)/Math.max(1e-6, seg.t1-seg.t0), 0, 1) : (bp ? bp.x : q.x), fy = seg ? seg.ay + (seg.by-seg.ay)*clamp((t-seg.t0)/Math.max(1e-6, seg.t1-seg.t0), 0, 1) : (bp ? bp.y : q.y);
@@ -1509,11 +1650,21 @@ function poseAt(it, t){
       q.hands = t < d.tb ? 1 : 2; q.kneel = clamp((t - d.tk)/ENG.kneel, 0, 1); q.detained = t >= d.tk; q.cuffed = t >= d.tcuff; q.v = 0; q.moving = false; q.sig = null; return q; }
     if(stunnedAt(it, t)) p.stun = true; return p; }
   const i = clamp(Math.round(t/ENG.dt), 0, M.n - 1), fa = M.face.get(it.id);
-  if(fa && t < M.n*ENG.dt){ p.r = fa[i]; const k = M.lock.get(it.id)[i]; if(k===1) p.g = 2; else if(k===2 || k===3) p.g = 0; }
+  if(fa && t < M.n*ENG.dt){ p.r = fa[i]; const k = M.lock.get(it.id)[i]; if(k===1) p.g = 2; }
   for(const [cid, d] of M.det) if(d.by===it.id && t >= d.tc && t < d.tcuff){ p.sig = {s:'ctrl', to:cid, t0:d.tc, t1:d.tcuff, quiet:true}; p.g = 0; }
   const dp = M.dpath.get(it.id); if(dp){ const a = dp.filter(s => t >= s.t0).pop(); if(a){ const f = clamp((t - a.t0)/Math.max(1e-6, a.t1 - a.t0), 0, 1), L = Math.hypot(a.bx-a.ax, a.by-a.ay)*FT;
       p.x = a.ax + (a.bx-a.ax)*f; p.y = a.ay + (a.by-a.ay)*f; p.moving = f < 1; p.v = f < 1 ? ENG.walk : 0; p.vn = ENG.walk; p.dist = a.d0 + L*f; } }
+  // in a room that still has a live bad guy or a civilian who isn't cuffed yet, every rifle stays up on target
+  // (the man cuffing has one hand on the civilian, so his rifle is down for those moments)
+  if(!(p.sig && p.sig.s==='ctrl') && roomLive(p.x, p.y, t)) p.g = 2;
   return p;
+}
+let RIc = null, RIver = -1;
+function roomLive(x, y, t){
+  if(RIver!==ver || !RIc){ RIc = roomIds(); RIver = ver; }
+  const r = RIc.at(x, y); if(r < 0) return false;
+  for(const q of S.items){ if(q.k!=='h' && q.k!=='c') continue; const o = poseAt(q, t); if(o.down || o.cuffed) continue; if(RIc.at(o.x, o.y)===r) return true; }
+  return false;
 }
 function flaggingWho(it, ps, t, poseOf){
   if(it.k!=='f' || S.flagRule===false) return null;
@@ -1669,6 +1820,12 @@ function drawPlan(){
       ctx.globalAlpha = 0.5; ctx.strokeStyle = pColor(it,C); ctx.lineWidth = 1/sc; ctx.stroke(); ctx.restore(); }
     ctx.globalAlpha = 1;
   }
+  // flashbang blast: the 15 ft circle where it stuns, shaded where the flash can actually be seen from the bang
+  for(const bp of bangPaths()){ const x = bp.rx, y = bp.ry, live = TIME >= bp.det && TIME < bp.det + BANG.stunT, v = visAt(x, y, 3);
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, BANG.stunR, 0, 7); ctx.clip();
+    if(v.length > 2){ polyPath(v); ctx.fillStyle = C.hostile; ctx.globalAlpha = live ? 0.22 : 0.07; ctx.fill(); }
+    ctx.restore(); ctx.strokeStyle = C.hostile; ctx.globalAlpha = live ? 0.9 : 0.45; ctx.lineWidth = 1.5/sc; ctx.setLineDash([4/sc, 4/sc]);
+    ctx.beginPath(); ctx.arc(x, y, BANG.stunR, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
 
   // static arrows
   for(const a of S.arrows){
@@ -1868,6 +2025,16 @@ function drawPlan(){
   for(const it of S.items){ if(!isPerson(it) || !it.wd) continue; const m = SC2.map.get(it.id); if(!m) continue;
     const w0 = m.ph.find(q => q.wander), c = w0 ? w0.A : {x:m.ph[m.ph.length-1].x, y:m.ph[m.ph.length-1].y}, q = toScreen(c.x, c.y), on = selPerson()===it;
     ctx.strokeStyle = pColor(it, C); ctx.globalAlpha = on ? 0.8 : 0.35; ctx.lineWidth = 1.5; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.arc(q.x, q.y, it.wd.r/FT*sc, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  // dead space: floor nobody has looked at yet (fades as the team's cones sweep it); never-seen patches are labelled
+  { const n = !READONLY ? deadSpaceSoon().clusters.length : 0, b = $('#btn-deadfix'); if(b){ b.hidden = !n || mode!=='plan'; b.textContent = `Clear dead space (${n})`; } }
+  if(deadOn && !READONLY){ const D = deadSpaceSoon(), cell = 0.5*sc;
+    for(const q of D.pts){ if(q.at <= TIME) continue; const p = toScreen(q.x, q.y); ctx.fillStyle = C.hostile; ctx.globalAlpha = q.at===Infinity ? 0.32 : 0.12; ctx.fillRect(p.x - cell/2, p.y - cell/2, cell, cell); }
+    ctx.globalAlpha = 1; for(const cl of D.clusters){ const p = toScreen(cl.x, cl.y); pill(p.x, p.y, 'DEAD SPACE', C.hostile, '#ffffff'); } }
+  // rounds that carry on past the bad guy: through walls in red, and who they hit
+  { const M = sim(); for(const rd of M.rounds){ if(!(rd.hit || rd.walls) || TIME < rd.t || TIME > rd.t + 0.8) continue;
+      const a = toScreen(rd.x1, rd.y1), b = toScreen(rd.x2, rd.y2); ctx.strokeStyle = C.hostile; ctx.lineWidth = 2; ctx.setLineDash([5,4]); ctx.globalAlpha = 1 - (TIME - rd.t)/0.8;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; } }
+  for(const bp of bangPaths()){ const q = toScreen(bp.rx, bp.ry + BANG.stunR); pill(q.x, q.y - 10, TIME >= bp.det && TIME < bp.det + BANG.stunT ? 'FLASHED ZONE' : 'BANG · 15 FT', C.hostile, '#ffffff'); }
   // shots: a short tracer from shooter to target and a flash at the muzzle
   { const M = sim(); for(const sh of M.shots){ if(TIME < sh.t || TIME > sh.t + 0.14) continue; const by = getItem(sh.by), at = getItem(sh.at); if(!by || !at) continue;
       const a = poses.get(by.id), b = poses.get(at.id); if(!a || !b) continue; const p0 = toScreen(a.x, a.y), p1 = toScreen(b.x, b.y);
@@ -1877,8 +2044,12 @@ function drawPlan(){
   for(const it of S.items){ if(!isPerson(it)) continue;
     { const ps = poses.get(it.id);
       if(ps.down){ const s = toScreen(ps.x, ps.y), R = R0, k = R*0.9;   // down: greyed out with an X
-        ctx.globalAlpha = 0.55; ctx.fillStyle = C.dead; const q = R*1.28; ctx.beginPath(); ctx.moveTo(s.x,s.y-q); ctx.lineTo(s.x+q,s.y); ctx.lineTo(s.x,s.y+q); ctx.lineTo(s.x-q,s.y); ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = 1; ctx.strokeStyle = C.hostile; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(s.x-k,s.y-k); ctx.lineTo(s.x+k,s.y+k); ctx.moveTo(s.x+k,s.y-k); ctx.lineTo(s.x-k,s.y+k); ctx.stroke();
+        ctx.globalAlpha = 0.55; ctx.fillStyle = it.k==='h' ? C.dead : pColor(it, C); ctx.beginPath();
+        if(it.k==='h'){ const q = R*1.28; ctx.moveTo(s.x,s.y-q); ctx.lineTo(s.x+q,s.y); ctx.lineTo(s.x,s.y+q); ctx.lineTo(s.x-q,s.y); ctx.closePath(); }
+        else if(it.k==='f') ctx.arc(s.x, s.y, R, 0, 7); else { const q = R*0.92; ctx.rect(s.x-q, s.y-q, q*2, q*2); }
+        ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = C.hostile; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(s.x-k,s.y-k); ctx.lineTo(s.x+k,s.y+k); ctx.moveTo(s.x+k,s.y-k); ctx.lineTo(s.x-k,s.y+k); ctx.stroke();
+        if(ps.hit && ps.hit.hostile) pill(s.x, s.y + R*2.4, 'HIT · SHOT BY A BAD GUY', C.hostile, '#ffffff');
+        else if(ps.hit){ const by = getItem(ps.hit.by); pill(s.x, s.y + R*2.4, `HIT${ps.hit.walls ? ' THROUGH ' + ps.hit.walls + (ps.hit.walls===1 ? ' WALL' : ' WALLS') : ''}${by ? ' · ' + tagOf(by) + '’S ROUND' : ''}`, C.hostile, '#ffffff'); }
         hits.push({kind:'item', it, x:s.x, y:s.y, rx:R+8, ry:R+8}); continue; } }
     const ps = poses.get(it.id), armed = it.k!=='c', flagged = armed && flaggingWho(it, ps, TIME, q => poses.get(q.id)), sg = armed ? sigGun(ps.sig) : null, gs = !armed ? 2 : (sg===1 || sg===0) ? sg : flagged ? 1 : sg===3 ? 3 : ps.g;
     const s = toScreen(ps.x,ps.y), R = R0*(it.p || ps.kneel > 0.5 ? 0.82 : 1), col = pColor(it,C);
@@ -1901,6 +2072,7 @@ function drawPlan(){
     else { const q=R*0.92; ctx.rect(s.x-q,s.y-q,q*2,q*2); }
     ctx.fill(); ctx.strokeStyle = C.sheet; ctx.lineWidth = 1.6; ctx.stroke();
     if(it.p || ps.kneel > 0.5){ ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(s.x-R, s.y+R*1.5); ctx.lineTo(s.x+R, s.y+R*1.5); ctx.stroke(); }
+    { const on = standOn(ps.x, ps.y); if(on && !ps.hands) pill(s.x, s.y + R*2.6, 'ON THE ' + FURN[on.k].n.toUpperCase(), col, '#ffffff'); }
     if(ps.hands) pill(s.x, s.y + R*2.6, ps.cuffed ? 'CUFFED' : ps.detained ? 'ON HIS KNEES' : 'HANDS UP', C.civ, '#ffffff');
     if(it.l){ ctx.fillStyle = '#ffffff'; ctx.font = `700 ${Math.round(R*(it.l.length>2?0.8:1.05))}px "Barlow Condensed", sans-serif`; ctx.fillText(it.l.slice(0,4), s.x, s.y+0.5); }
     if(armed && GUN_TAG[gs]){ const fs = Math.max(9, Math.round(R*0.7)); ctx.font = `700 ${fs}px "Barlow Condensed", sans-serif`; ctx.textAlign = 'left';
@@ -1920,7 +2092,7 @@ function drawPlan(){
   }
 
   // "Clear, detain" call, and the detainer's commands while he walks up
-  { const M = sim(), call = M.call; if(call && TIME >= call.t && TIME < call.t + ENG.call){ const by = getItem(call.by), q = by && poses.get(by.id); if(q){ const s = toScreen(q.x, q.y); pill(s.x, s.y - R0*2.4, 'CLEAR · DETAIN', C.accent, tok('--accent-ink')); } }
+  { const M = sim();
     for(const [cid, d] of M.det){ if(TIME < d.t0 || TIME > d.tcuff) continue; const by = getItem(d.by), q = by && poses.get(by.id); if(!q) continue; const s = toScreen(q.x, q.y);
       pill(s.x, s.y - R0*2.4, TIME < d.tk - 0.6 ? 'HANDS! DON’T MOVE' : TIME < d.tb ? 'ON YOUR KNEES' : TIME < d.tc ? 'HANDS BEHIND YOUR BACK' : 'CUFFING', pColor(by, C), '#ffffff'); } }
   // signals between teammates and gates opening
@@ -2017,6 +2189,7 @@ function actTag(a){
     case 'gate': return '🔒 '+a.name;
     case 'sync': return 'SYNC '+a.c;
     case 'bang': return '💥 ' + (a.hook ? 'HOOK ' : '') + 'BANG ' + (+a.fuse||1.5).toFixed(1) + 's';
+    case 'clear': return '📣 CLEAR';
     case 'bcall': { const to = a.to && getItem(a.to); return '✊ BANG CALL' + (to ? ' → ' + tagOf(to) : ''); }
     case 'btake': { const fr = a.from && getItem(a.from); return '✋ TAKES CALL' + (fr ? ' ← ' + tagOf(fr) : ''); }
     case 'wbang': { const w = a.by && getItem(a.by); return 'MOVE ON BANG' + (w ? ' ('+tagOf(w)+')' : '') + (a.d ? ' ' + (a.d>0?'+':'') + (+a.d).toFixed(1) : ''); }
@@ -2402,6 +2575,7 @@ function actsEditor(it, owner, oi){
       body = `${segA('a-hook', ai, [[1,'Hook'],[0,'Overhand']], a.hook?1:0)}<button class="btn sm ${bArm?'on':''}" data-act="a-look" data-ai="${ai}">${bArm ? 'Tap where it lands…' : 'Move landing spot'}</button><span class="small">fuse</span>${stepA('a-fuse', ai, a.fuse||1.5, 's')}
         ${bp ? `<span class="small">${(Math.hypot(a.x-(oi<0?it.x:owner.x), a.y-(oi<0?it.y:owner.y))*FT).toFixed(0)} ft throw · goes off at ${bp.det.toFixed(1)} s</span>` : ''}
         ${bp && bp.blocked ? '<span class="small" style="color:var(--hostile)">Something is in the way: it hits it and drops short.</span>' : ''}`; }
+    else if(a.k==='clear'){ const W = clearWarn(it), dz = deadSpace().clusters.length; body = `<span class="small">calls “Clear”: once every bad guy is down, the team starts detaining.</span>${W.map(x => `<span class="small" style="color:var(--hostile)">${x}</span>`).join('')}${dz ? `<button class="btn sm" data-act="deadfix">Clear dead space (${dz})</button>` : ''}`; }
     else if(a.k==='bcall') body = `<select data-af="to" data-ai="${ai}" id="af-bc-${ai}" aria-label="Who takes the call"><option value="">nobody (not in a stack)</option>${others.map(q => `<option value="${q.id}" ${a.to===q.id?'selected':''}>to ${esc(tagOf(q))}</option>`).join('')}</select>
       <span class="small">${a.to ? 'arm up, fist pumps three times, then the fist stays up until he puts his hand on it' : 'arm up, fist pumps three times, hand back on the rifle'}</span>`;
     else if(a.k==='btake') body = `<select data-af="from" data-ai="${ai}" id="af-bt-${ai}" aria-label="Whose call"><option value="">from anyone</option>${others.map(q => `<option value="${q.id}" ${a.from===q.id?'selected':''}>from ${esc(tagOf(q))}</option>`).join('')}</select>
@@ -2548,6 +2722,7 @@ insp.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if(!b || !sel) return;
   const act = b.dataset.act, v = b.dataset.v;
   if(act==='close'){ lookArm = null; updateHint(); select(null); return; }
+  if(act==='deadfix'){ if(!READONLY) fixDeadSpace(); return; }
   if(act==='mini'){ inspMini = !inspMini; try{ localStorage.setItem('cqb-insp-mini', inspMini ? '1' : '0'); }catch(err){} renderInspector(); return; }
   if(act==='ro-los'){ losId = losId===sel.id ? null : sel.id; drawPlan(); renderInspector(); if(T) T.dirty=true; return; }
   if(act==='ro-eyes'){ walkFromId = sel.id; setMode('walk'); return; }
@@ -2634,6 +2809,7 @@ function actClick(act, v, ai){
       for(const q of others){ const d = Math.hypot(q.x-it.x, q.y-it.y); if(d<bd){ bd=d; best=q; } }
       a = {k:'sig', s:'nod', to:best?best.id:null, d:0.8, txt:''}; }
     else if(v==='bang'){ a = {k:'bang', x:snap(here.x + Math.cos(rad(here.r))*3,1/6), y:snap(here.y + Math.sin(rad(here.r))*3,1/6), fuse:1.5, hook:1}; }
+    else if(v==='clear') a = {k:'clear'};
     else if(v==='bcall' || v==='btake'){ const others = S.items.filter(q => isPerson(q) && q!==it && q.k===it.k); let best = null, bd = 1e9;
       // the man right behind him takes the call; the man right in front makes it
       const fwd = {x:Math.cos(rad(here.r)), y:Math.sin(rad(here.r))};
@@ -2714,6 +2890,7 @@ function setMode(m){
   const plan = m==='plan';
   planCv.hidden = !plan; toolsEl.hidden = !plan; $('#timeline').classList.toggle('last', !plan); $('#hud-legend').hidden = !plan; $('#tool-hint').hidden = !plan;
   $('#btn-fit').textContent = plan ? 'Fit' : m==='walk' ? 'Restart' : 'Reset view';
+  $('#btn-dead').hidden = m!=='plan'; $('#btn-deadfix').hidden = true;
   $('#btn-threat').hidden = m==='walk'; $('#btn-cones').hidden = m==='walk'; $('#btn-routes').hidden = m==='walk';
   syncCamUI();
   hidePicker(); renderInspector(); updateCaption(); updateHint();
@@ -3152,7 +3329,9 @@ function build3D(){
     const ball = new THREE.Mesh(gPuff, new THREE.MeshBasicMaterial({color:'#ffffff', transparent:true, opacity:0, depthWrite:false})); ball.visible = false; root.add(ball);
     const light = new THREE.PointLight(0xffffff, 0, 40); root.add(light);
     const puffs = []; for(let i=0;i<7;i++){ const m = new THREE.Mesh(gPuff, new THREE.MeshLambertMaterial({color:'#a3a39d', transparent:true, opacity:0, depthWrite:false})); m.visible = false; root.add(m); puffs.push(m); }
-    T.bangs.push({p, can, ball, light, puffs});
+    const ring = new THREE.Mesh(new THREE.RingGeometry(BANG.stunR*FT - 0.25, BANG.stunR*FT, 64), new THREE.MeshBasicMaterial({color:'#ff6a3d', transparent:true, opacity:0, side:THREE.DoubleSide, depthWrite:false}));
+    ring.rotation.x = -Math.PI/2; ring.position.set(p.rx*FT, 0.08, p.ry*FT); ring.visible = false; root.add(ring);
+    T.bangs.push({p, can, ball, light, puffs, ring});
   }
   const Wd = S.cols*FT, Hd = S.rows*FT; T.segs.push([-3,-3,Wd+3,-3],[Wd+3,-3,Wd+3,Hd+3],[Wd+3,Hd+3,-3,Hd+3],[-3,Hd+3,-3,-3]);
 }
@@ -3167,6 +3346,7 @@ function updateDyn(dt){
   if(T.camPath) T.camPath.visible = camMode==='path' && false;
   for(const bb of (T.bangs||[])){ const p = bb.p, b = bangAt(p, TIME), dt = TIME - p.det;
     bb.can.visible = !!b && b.state!=='spent'; if(b){ bb.can.position.set(b.x*FT, Math.max(0.15, b.z), b.y*FT); bb.can.rotation.z = b.state==='air' ? TIME*12 : Math.PI/2; }
+    if(bb.ring){ const on = TIME >= p.det && TIME < p.det + BANG.stunT; bb.ring.visible = on; if(on){ bb.ring.material.opacity = 0.85*(1 - (TIME - p.det)/BANG.stunT); busy = true; } }
     const boom = b && b.state==='spent' && dt < 0.5; bb.ball.visible = boom; bb.light.intensity = boom ? 6*(1-dt/0.5) : 0;
     if(b){ bb.light.position.set(b.x*FT, 3, b.y*FT); bb.ball.position.set(b.x*FT, 1.5, b.y*FT); }
     if(boom){ const s = 1 + dt*14; bb.ball.scale.set(s,s,s); bb.ball.material.opacity = 0.9*(1-dt/0.5); busy = true; }
@@ -3179,7 +3359,8 @@ function updateDyn(dt){
   for(const dr of (T.doors||[])){ const s = doorSlab(dr.d, dr.x, dr.y, dr.e, doorAngle(dr.k, TIME)); dr.grp.rotation.y = -Math.atan2(s.ey-s.hy, s.ex-s.hx); }
   for(const p of T.people){
     const ps = poseAt(p.it, TIME);
-    p.g.position.set(ps.x*FT, 0, ps.y*FT); p.g.rotation.y = -rad(ps.r||0);
+    { const on = standOn(ps.x, ps.y), hy = on ? FURN[on.k].h : 0; p.hY = p.hY==null ? hy : p.hY + (hy - p.hY)*Math.min(1, dt*10); if(Math.abs(hy - p.hY) > 0.01) busy = true; }
+    p.g.position.set(ps.x*FT, p.hY, ps.y*FT); p.g.rotation.y = -rad(ps.r||0);
     if(p.sp) p.sp.position.set(ps.x*FT, p.it.p?5.6:7.3, ps.y*FT);
     { const fl0 = p.pivot ? flaggingWho(p.it, ps, TIME, q => poseAt(q, TIME)) : false, sg0 = sigGun(ps.sig); p.gstate = !p.pivot ? 2 : (sg0===1 || sg0===0) ? sg0 : fl0 ? 1 : sg0===3 ? 3 : ps.g; }
     poseFigure(p, ps, p.gstate); if(ps.moving) busy = busy || playing;
@@ -3234,9 +3415,9 @@ function updateDyn(dt){
           setLimb(a.up, a.sh, elbow, 0.13); setLimb(a.fore, elbow, handP, 0.11); a.hand.position.copy(handP); a.elbow.position.copy(elbow); }); } }
     // tracers: from his muzzle to the target's chest for a moment after each round
     let ti = 0; for(const m of (T.tracers||[])) m.visible = false;
-    for(const sh of M.shots){ if(TIME < sh.t || TIME > sh.t + 0.12 || ti >= (T.tracers||[]).length) continue;
-      const by = T.people.find(q => q.it.id===sh.by), at = T.people.find(q => q.it.id===sh.at); if(!by || !at || !by.pivot) continue;
-      by.g.updateMatrixWorld(true); const a = by.pivot.localToWorld(V3(2.4, 0.02, 0)), b = at.g.localToWorld(V3(0, 4.2, 0)), d = b.clone().sub(a), L = d.length();
+    for(const sh of M.rounds){ if(TIME < sh.t || TIME > sh.t + 0.12 || ti >= (T.tracers||[]).length) continue;
+      const by = T.people.find(q => q.it.id===sh.by); if(!by || !by.pivot) continue;
+      by.g.updateMatrixWorld(true); const a = by.pivot.localToWorld(V3(2.4, 0.02, 0)), b = V3(sh.x2*FT, 4.2, sh.y2*FT), d = b.clone().sub(a), L = d.length();
       const m = T.tracers[ti++]; m.visible = true; m.scale.set(1, L, 1); m.position.copy(a).add(b).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(V3(0,1,0), d.normalize());
       m.material.opacity = 0.95*(1 - (TIME - sh.t)/0.12); busy = busy || playing; } }
   // the bang is in his hand from when he takes it off his kit until it leaves his hand
@@ -3495,6 +3676,14 @@ $('#btn-add-step').addEventListener('click', () => { checkpoint(); const s = {id
 $('#btn-undo').addEventListener('click', undo);
 $('#btn-redo').addEventListener('click', redo);
 $('#btn-fit').addEventListener('click', () => { if(mode==='plan') fitPlan(); else if(mode==='walk') startWalk(); else resetOrbit(); });
+$('#btn-dead').addEventListener('click', () => { deadOn = !deadOn; $('#btn-dead').setAttribute('aria-pressed', String(deadOn)); drawPlan();
+  if(!deadOn){ toast('Dead space shading off'); return; }
+  const D = deadSpace(); drawPlan();
+  toast(!S.items.some(q => q.k==='f') ? 'Dead space is checked in the rooms your friendlies finish in: add the team first'
+    : !D.pts.length ? 'Dead space is checked in the rooms your friendlies finish in: none of them end up inside a room yet'
+    : D.clusters.length ? `${D.clusters.length===1 ? 'One patch' : D.clusters.length + ' patches'} of floor nobody looks at (solid red). Faint red is floor that hasn’t been looked at yet at this point in the timeline`
+    : 'No dead space: every part of the room has been looked at by the end. Faint red is floor that hasn’t been looked at yet at this point in the timeline'); });
+$('#btn-deadfix').addEventListener('click', () => { if(READONLY) return; fixDeadSpace(); });
 $('#btn-threat').addEventListener('click', () => { threatOn = !threatOn; $('#btn-threat').setAttribute('aria-pressed', String(threatOn)); drawPlan(); if(T) T.dirty = true; });
 $('#btn-routes').addEventListener('click', () => { routesOn = !routesOn; $('#btn-routes').setAttribute('aria-pressed', String(routesOn)); if(T && T.routes) T.routes.visible = routesOn; drawPlan(); if(T) T.dirty = true;
   toast(routesOn ? 'Routes showing' : 'Routes hidden · clean view for demos and video'); });
@@ -3668,7 +3857,7 @@ function sampleDrill(){
       [9.6,5.5,5, [['l',...DOOR,0],['g',2],['q','Door'],['d','h,10,6','hand','']]],   // opens the door by hand
       [10.5,6.4,5, 0, 10.6,8.5],
       [11.8,6.9,5, 0, 13.8,6.4],                                          // first in: buttons LEFT
-      [12.9,7.2,3, 0, 11,10.4]]],
+      [12.9,7.2,3, [['Z']], 11,10.4]]],                                    // calls "Clear" once the room is done
     ['f',3.4,4.8,0,'3',0, 0, 0, [
       [8.4,5.0,5, [['D','h,10,6','half']]],                               // flows when the door is half open
       [10.0,5.6,5, 0, ...DOOR],
@@ -3680,7 +3869,7 @@ function sampleDrill(){
       [9.9,5.6,5, 0],
       [10.5,6.7,5, 0, 12,9],
       [11.7,8.8,4, 0, 11.4,10.8]]],                                       // flows LEFT, opposite #3's gun
-    ['h',7.9,10.3,315,'',0, 2],
+    ['h',7.9,10.3,200,'',0, 2],                                         // facing away from the door: the team gets the drop on him
     ['c',12.6,10.2,270,'',0, 0],
     ['table',10.7,9.2,0,'',0],['shelf',13.6,8.6,90,'',0],
     ['label',16.5,5.05,0,'Hallway',0],['label',10.5,10.6,0,'Room',0]
@@ -3722,8 +3911,8 @@ function sampleTDrill(){
       [9.6,6.6,4, [['g',1],['y','A'],['s','nod',2,0.8,''],['s','tri',1,0.6,''],['w',0.6]], 9.5,3],
       [9.2,4.5,4, [['g',2]], 16,4],
       [10.6,4.3,4, 0, 17,4.2]]],
-    ['h',2.6,4.2,0,'',0, 2],
-    ['h',15.6,3.8,180,'',0, 2],
+    ['h',2.6,4.2,180,'',0, 2],                                          // both facing away down their halls
+    ['h',15.6,3.8,0,'',0, 2],
     ['label',9,9.5,0,'Stem',0],['label',4,3.6,0,'',0]
   ].filter(r => r[0]!=='label' || r[4]);
   const data = {v:3, t:'Drill · T-intersection',
@@ -4892,7 +5081,7 @@ window.addEventListener('resize', () => { if(tourI >= 0) tourShow(tourI, 1); });
 window.addEventListener('keydown', e => { if(tourI < 0) return; if(e.key==='Escape'){ tourEnd(); e.stopPropagation(); } else if(e.key==='ArrowRight'){ tourShow(tourI+1, 1); } else if(e.key==='ArrowLeft'){ tourShow(tourI-1, -1); } }, true);
 
 // the scenario a fresh copy of the planner opens with
-const DEFAULT_SCENARIO = {"v":3,"ro":0,"t":"Drill · Hall boss gives up the door","n":"EXAMPLE DRILL — adjust spacing, timing and calls to your SOP.\n\nThe sequence:\n• #1 (hall boss) reaches the threshold with his gun trained on the door.\n• He relinquishes the door by looking back down the hallway. That opens the gate “Door”.\n• #2 is holding on gate “Door”. Once it opens he flows in and buttons left. #3 follows and buttons right; #4 flows opposite the gun in front of him.\n\nTap a shooter, then a waypoint, to see the actions that make this happen.","w":20,"h":12,"e":[["h",1,4,"w",0,0],["h",2,4,"w",0,0],["h",3,4,"w",0,0],["h",4,4,"w",0,0],["h",5,4,"w",0,0],["h",6,4,"w",0,0],["h",7,4,"w",0,0],["h",8,4,"w",0,0],["h",9,4,"w",0,0],["h",10,4,"w",0,0],["h",11,4,"w",0,0],["h",12,4,"w",0,0],["h",13,4,"w",0,0],["h",14,4,"w",0,0],["h",15,4,"w",0,0],["h",16,4,"w",0,0],["h",17,4,"w",0,0],["h",18,4,"w",0,0],["h",1,6,"w",0,0],["h",2,6,"w",0,0],["h",3,6,"w",0,0],["h",4,6,"w",0,0],["h",5,6,"w",0,0],["h",6,6,"w",0,0],["h",7,6,"w",0,0],["h",8,6,"w",0,0],["h",9,6,"w",0,0],["h",11,6,"w",0,0],["h",12,6,"w",0,0],["h",13,6,"w",0,0],["h",14,6,"w",0,0],["h",15,6,"w",0,0],["h",16,6,"w",0,0],["h",17,6,"w",0,0],["h",18,6,"w",0,0],["v",1,4,"w",0,0],["v",1,5,"w",0,0],["v",7,6,"w",0,0],["v",7,7,"w",0,0],["v",7,8,"w",0,0],["v",7,9,"w",0,0],["v",7,10,"w",0,0],["v",14,6,"w",0,0],["v",14,7,"w",0,0],["v",14,8,"w",0,0],["v",14,9,"w",0,0],["v",14,10,"w",0,0],["h",7,11,"w",0,0],["h",8,11,"w",0,0],["h",9,11,"w",0,0],["h",10,11,"w",0,0],["h",11,11,"w",0,0],["h",12,11,"w",0,0],["h",13,11,"w",0,0]],"i":[["f",5,4.33,0,"1",0,2,0,[[9,4.33,5,[["w",1],["o","Door"],["l",13,5,0]],12,6.67],[10.5,6,5,[["l",13,5.17,0.5]],13,5]]],["f",5,5.5,0,"2",0,2,0,[[9,5.5,5,[["q","Door"]],16.83,5.5],[10.17,6,5,0,10.33,7.33],[10.17,6.33,5,[["l",7.17,6.33,0]],7.5,6.33],[9.5,6.33,5,[["l",9.5,10,0.5]]]]],["f",4.5,5.5,0,"3",0,1,0,[[8.83,5.5,5,[["q","Door"]]],[9.33,5.67,5,[["g",2]],13.5,6.17],[10.5,6.17,5,[["g",2]],13.67,6.17],[11.17,6.17,5,[["l",11,10.17,0.5]],13.67,6.33]]],["f",4,5.5,0,"4",0,1,0,[[8.67,5.5,5,[["q","Door"],["g",2]]],[10.5,5.83,5,[["g",2]]],[10.5,6.33,5,0,10.67,10]]],["h",7.9,10.3,315,"",0,2,0],["c",12.6,10.2,270,"",0],["table",10.7,9.2,0,"",0],["shelf",13.6,8.6,90,"",0],["label",16.5,5.05,0,"Hallway",0],["label",10.5,10.6,0,"Room",0]],"a":[],"s":[]};
+const DEFAULT_SCENARIO = {"v":3,"ro":0,"t":"Drill · Hall boss gives up the door","n":"EXAMPLE DRILL — adjust spacing, timing and calls to your SOP.\n\nThe sequence:\n• #1 (hall boss) reaches the threshold with his gun trained on the door.\n• He relinquishes the door by looking back down the hallway. That opens the gate “Door”.\n• #2 is holding on gate “Door”. Once it opens he flows in and buttons left. #3 follows and buttons right; #4 flows opposite the gun in front of him.\n\nTap a shooter, then a waypoint, to see the actions that make this happen.","w":20,"h":12,"e":[["h",1,4,"w",0,0],["h",2,4,"w",0,0],["h",3,4,"w",0,0],["h",4,4,"w",0,0],["h",5,4,"w",0,0],["h",6,4,"w",0,0],["h",7,4,"w",0,0],["h",8,4,"w",0,0],["h",9,4,"w",0,0],["h",10,4,"w",0,0],["h",11,4,"w",0,0],["h",12,4,"w",0,0],["h",13,4,"w",0,0],["h",14,4,"w",0,0],["h",15,4,"w",0,0],["h",16,4,"w",0,0],["h",17,4,"w",0,0],["h",18,4,"w",0,0],["h",1,6,"w",0,0],["h",2,6,"w",0,0],["h",3,6,"w",0,0],["h",4,6,"w",0,0],["h",5,6,"w",0,0],["h",6,6,"w",0,0],["h",7,6,"w",0,0],["h",8,6,"w",0,0],["h",9,6,"w",0,0],["h",11,6,"w",0,0],["h",12,6,"w",0,0],["h",13,6,"w",0,0],["h",14,6,"w",0,0],["h",15,6,"w",0,0],["h",16,6,"w",0,0],["h",17,6,"w",0,0],["h",18,6,"w",0,0],["v",1,4,"w",0,0],["v",1,5,"w",0,0],["v",7,6,"w",0,0],["v",7,7,"w",0,0],["v",7,8,"w",0,0],["v",7,9,"w",0,0],["v",7,10,"w",0,0],["v",14,6,"w",0,0],["v",14,7,"w",0,0],["v",14,8,"w",0,0],["v",14,9,"w",0,0],["v",14,10,"w",0,0],["h",7,11,"w",0,0],["h",8,11,"w",0,0],["h",9,11,"w",0,0],["h",10,11,"w",0,0],["h",11,11,"w",0,0],["h",12,11,"w",0,0],["h",13,11,"w",0,0]],"i":[["f",5,4.33,0,"1",0,2,0,[[9,4.33,5,[["w",1],["o","Door"],["l",13,5,0]],12,6.67],[10.5,6,5,[["l",13,5.17,0.5]],13,5]]],["f",5,5.5,0,"2",0,2,0,[[9,5.5,5,[["q","Door"]],16.83,5.5],[10.17,6,5,0,10.33,7.33],[10.17,6.33,5,[["l",7.17,6.33,0]],7.5,6.33],[9.5,6.33,5,[["l",9.5,10,0.5],["Z"]]]]],["f",4.5,5.5,0,"3",0,1,0,[[8.83,5.5,5,[["q","Door"]]],[9.33,5.67,5,[["g",2]],13.5,6.17],[10.5,6.17,5,[["g",2]],13.67,6.17],[11.17,6.17,5,[["l",11,10.17,0.5]],13.67,6.33]]],["f",4,5.5,0,"4",0,1,0,[[8.67,5.5,5,[["q","Door"],["g",2]]],[10.5,5.83,5,[["g",2]]],[10.5,6.33,5,0,10.67,10]]],["h",7.9,10.3,135,"",0,2,0],["c",12.6,10.2,270,"",0],["table",10.7,9.2,0,"",0],["shelf",13.6,8.6,90,"",0],["label",16.5,5.05,0,"Hallway",0],["label",10.5,10.6,0,"Room",0]],"a":[],"s":[]};
 $('#btn-default').addEventListener('click', () => confirmAsk('Replace this layout with the default scenario?', 'Load default', () => {
   loadScenario(DEFAULT_SCENARIO, {undoable:true}); $('#share').hidden = true; setMode('plan'); }));
 
