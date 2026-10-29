@@ -782,11 +782,12 @@ function toData(ro){
   return {v:3, ro:ro?1:0, t:S.title, n:S.notes, fr:S.flagRule===false?0:1, w:S.cols, h:S.rows,
     e:[...S.edges].map(([k,e]) => { const [d,x,y]=parseKey(k); return [d,x,y,e.t,e.s||0,e.a||0]; }),
     i:S.items.map(it => { const row = [it.k, r2(it.x), r2(it.y), Math.round(it.r||0), it.l||'', it.p||0];
-      if(isPerson(it) && (it.g || (it.acts && it.acts.length) || (it.path && it.path.length))){
+      if(isPerson(it) && (it.g || (it.acts && it.acts.length) || (it.path && it.path.length) || it.wd)){
         row.push(it.g||0, packActs(it.acts));
         if(it.path && it.path.length) row.push(it.path.map(w => { const q = [r2(w.x), r2(w.y), w.sp||5, packActs(w.acts)];
           if(w.lx!=null || w.cx!=null) q.push(w.lx!=null ? r2(w.lx) : null, w.lx!=null ? r2(w.ly) : null);
           if(w.cx!=null) q.push(r2(w.cx), r2(w.cy)); return q; }));
+        if(it.wd){ if(!(it.path && it.path.length)) row.push(0); row.push([r2(it.wd.r), it.wd.seed|0]); }
       }
       return row; }),
     a:S.arrows.map(a => [r2(a.x1), r2(a.y1), r2(a.x2), r2(a.y2), a.c||0]),
@@ -868,6 +869,7 @@ function fromData(d){
           if(q.length>=8 && q[6]!=null && Number.isFinite(+q[6])){ w.cx = +q[6]; w.cy = num(q[7], w.y); } return w; });
       }
       if(o.path && !o.path.length) delete o.path;
+      if(v >= 3 && Array.isArray(it[9]) && (k==='h' || k==='c')){ const r = clamp(num(it[9][0], 0), 0, 30); if(r > 0) o.wd = {r, seed:(it[9][1]|0) >>> 0}; }
     }
     s.items.push(o); });
   // signal targets were saved by position in the list
@@ -916,6 +918,8 @@ function legTab(A, B){
     if(i) cum.push(cum[i-1] + Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y)); }
   t = {pts, cum, L:cum[LEG_N]}; if(legCache.size > 5000) legCache.clear(); legCache.set(k, t); return t;
 }
+// small seeded random number generator (same seed, same numbers)
+function mulberry(a){ return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 function legLen(A, B){ return isCurved(B) ? legTab(A, B).L : Math.hypot(B.x-A.x, B.y-A.y); }   // grid squares
 // point, heading (degrees) and curve parameter at fraction f of the leg's length
 function legPt(A, B, f){
@@ -1133,6 +1137,20 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
     arr[i] = t;
     ok = run(w.acts);
   });
+  const core = t;   // when his own plan is done (wandering after it doesn't stretch the timeline)
+  // wander: after his route he roams inside a bubble around where he ended up, walking and pausing at random.
+  // The randomness comes from a saved seed, so it plays the same every time until you reroll it.
+  if(ok && !blocked && it.wd && it.wd.r > 0 && it.k!=='f'){
+    const rnd = mulberry(it.wd.seed || 1), R = it.wd.r/FT, cx0 = x, cy0 = y; let k = 0;
+    while(t < core + 90 && k < 80){ k++;
+      let tx = null, ty = null;
+      for(let tries = 0; tries < 12 && tx==null; tries++){ const a = rnd()*Math.PI*2, d = Math.sqrt(rnd())*R, px = cx0 + Math.cos(a)*d, py = cy0 + Math.sin(a)*d;
+        if(Math.hypot(px - x, py - y) < 0.4) continue; if(legBlock({x, y}, {x:px, y:py})) continue; tx = px; ty = py; }
+      if(tx==null){ hold(1); continue; }
+      const A = {x, y}, B = {x:tx, y:ty}, dist = legLen(A, B)*FT, sp = 2.5 + rnd()*1.5, d = dist/sp, tr = legPt(A, B, 0).r;
+      ph.push({k:'m', t0:t, t1:t+d, ax:x, ay:y, bx:tx, by:ty, A, B, fe:1, tr, rIn:r, look:null, g, leg:1000+k, wander:true}); t += d; x = tx; y = ty; r = tr;
+      hold(0.6 + rnd()*2.2); }
+  }
   ph.push({k:'e', t0:t, t1:Infinity, x, y, r0:r, look:null, g});
   // movement shape: he speeds up out of a stop and slows into one; legs he walks straight through carry on at speed
   let dacc = 0;
@@ -1141,7 +1159,7 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
     q.cin = !!(pr && pr.k==='m' && Math.abs(pr.t1 - q.t0) < 1e-6); q.cout = !!(nx && nx.k==='m' && Math.abs(nx.t0 - q.t1) < 1e-6);
     const T = Math.max(1e-6, q.t1 - q.t0); q.ta = q.cin ? 0 : Math.min(ACC_T, T*0.45); q.tb = q.cout ? 0 : Math.min(ACC_T, T*0.45);
     q.vmax = 1/(T - q.ta/2 - q.tb/2); }
-  return {ph, arr, sigs, fired, end:t, stuck, blocked};
+  return {ph, arr, sigs, fired, end:core, endAll:t, stuck, blocked};
 }
 // how far along a leg he is at time t (0–1) and his speed then (fraction of the leg per second)
 function legFrac(q, t){
@@ -1194,7 +1212,8 @@ function facingTrack(it){
   for(let i=1;i<n;i++){ const want = rawPoseAt(it, i*DT).r; r = (r + clamp(angDiff(r, want), -mx, mx) + 360) % 360; a[i] = r; }
   tr = {a, DT, n}; FT_.m.set(it.id, tr); return tr;
 }
-function poseAt(it, t){
+// where someone is and which way he faces, as planned (before engagements and detaining are worked out)
+function poseBase(it, t){
   const p = rawPoseAt(it, t); if(!sched().map.get(it.id)) return p;
   const tr = facingTrack(it), f = clamp(t/tr.DT, 0, tr.n-1), i = Math.floor(f), j = Math.min(tr.n-1, i+1);
   p.r = (tr.a[i] + angDiff(tr.a[i], tr.a[j])*(f-i) + 360) % 360; return p;
@@ -1245,7 +1264,7 @@ function rawPoseAt0(it, t){
   if(p.sweep) r = (r + SWEEP.half*Math.sin(2*Math.PI*(t - p.sweep.t0)/SWEEP.per) + 360) % 360;
   return {x:p.x, y:p.y, r, g:p.g, sig, dist:p.d0||0, v:0};
 }
-function dur(){ let d = sched().end; for(const s of S.steps) if(s.t < 1e5) d = Math.max(d, s.t+1.5); return d; }
+function dur(){ let d = Math.max(sched().end, sim().end); for(const s of S.steps) if(s.t < 1e5) d = Math.max(d, s.t+1.5); return d; }
 const tlMax = () => Math.max(10, Math.ceil(dur()) + 4);
 
 /* ---------------- geometry ---------------- */
@@ -1369,7 +1388,7 @@ function bangAt(p, t){
 function flashAlpha(t){ let a = 0; for(const p of bangPaths()){ const d = t - p.det; if(d >= 0 && d < 0.7) a = Math.max(a, Math.pow(1 - d/0.7, 2)*0.85); } return a; }
 function stunnedAt(it, t){
   if(it.k==='f') return false;
-  const ps = poseAt(it, t);
+  const ps = poseBase(it, t);
   for(const p of bangPaths()){ if(t < p.det || t > p.det + BANG.stunT) continue;
     const b = bangAt(p, p.det); if(Math.hypot(ps.x-b.x, ps.y-b.y) > BANG.stunR) continue;
     if(firstHit(b.x, b.y, ps.x, ps.y, bangBlockers(p.det)).hit) continue; return true; }
@@ -1382,6 +1401,120 @@ function stunnedAt(it, t){
 const FLAG_R = 0.5/FT;   // 6 in, in squares
 let FB = {key:'', segs:null};
 function flagBlockers(t){ const k = ver + '|' + t.toFixed(3); if(FB.key!==k) FB = {key:k, segs:bangBlockers(t)}; return FB.segs; }
+/* ---------------- engagement, look priority and detaining ----------------
+   Worked out once per change, after the plan, in 1/30 s steps.
+   • Look priority: while a friendly is still working his plan (moving in, digging his corner) he looks where the plan
+     says, and only turns for a bad guy who's already in front of him. Once his moves are done he locks onto whoever is
+     in his view cone: a live bad guy first, otherwise a civilian who isn't detained yet. He turns at a natural speed.
+   • Engaging: he shoots a live bad guy he can see when nobody (teammate or civilian) is in the line of fire. He needs a
+     moment to react and to get his muzzle on, then fires a pair. The bad guy goes down. Bad guys don't shoot back.
+   • Detaining: once every bad guy is down, the first friendly who's free and can see a civilian calls "Clear, detain".
+     Each civilian is then taken by the nearest free friendly: the civilian freezes with his hands up, the friendly
+     walks up to about 3 ft, and the civilian goes to his knees and stays there. */
+const ENG = {dt:1/30, react:0.3, aimTol:6, pair:0.15, range:14, ffR:1.0/FT, standoff:3/FT, hands:1.5/FT, walk:4, kneel:0.8, behind:0.7, cuff:1.4, call:1.0, coverRange:9};
+let SIM = null, SIMver = -1;
+function sim(){ if(SIM && SIMver===ver) return SIM; SIMver = ver; SIM = runSim(); return SIM; }
+function runSim(){
+  const sc = sched(), dt = ENG.dt, people = S.items.filter(isPerson), FR = people.filter(q => q.k==='f'), HO = people.filter(q => q.k==='h'), CV = people.filter(q => q.k==='c');
+  const out = {down:new Map(), det:new Map(), dpath:new Map(), face:new Map(), lock:new Map(), shots:[], call:null, end:0, n:0};
+  if(!FR.length || (!HO.length && !CV.length)) return out;
+  const horizon = sc.end + 25, n = Math.ceil(horizon/dt) + 1; out.n = n;
+  // when each friendly is done with his own moves (free to look around)
+  const freeT = new Map(FR.map(q => { const m = sc.map.get(q.id), mv = m ? m.ph.filter(p => p.k==='m' && !p.wander) : []; return [q.id, mv.length ? mv[mv.length-1].t1 : 0]; }));
+  const face = new Map(FR.map(q => [q.id, new Float32Array(n)])), lock = new Map(FR.map(q => [q.id, new Uint8Array(n)]));
+  const cur = new Map(FR.map(q => [q.id, poseBase(q, 0).r])), target = new Map(), seen = new Map(), busy = new Map();
+  const posOf = (q, t) => {   // where someone is at t, given what's happened so far
+    if(q.k==='h' && out.down.has(q.id) && t >= out.down.get(q.id)) return poseBase(q, out.down.get(q.id));
+    if(q.k==='c' && out.det.has(q.id) && t >= out.det.get(q.id).t0) return poseBase(q, out.det.get(q.id).t0);
+    const dp = q.k==='f' && out.dpath.get(q.id);
+    if(dp){ const a = dp.filter(s => t >= s.t0).pop(); if(a){ const f = clamp((t - a.t0)/Math.max(1e-6, a.t1 - a.t0), 0, 1); return {...poseBase(q, t), x:a.ax + (a.bx-a.ax)*f, y:a.ay + (a.by-a.ay)*f}; } }
+    return poseBase(q, t); };
+  const alive = (h, t) => !(out.down.has(h.id) && t >= out.down.get(h.id));
+  const free = (c, t) => !(out.det.has(c.id) && t >= out.det.get(c.id).t0);
+  let allDown = HO.length ? Infinity : 0, last = 0;
+  for(let i=0;i<n;i++){ const t = i*dt, segs = bangBlockers(t), P = new Map(people.map(q => [q.id, posOf(q, t)]));
+    const sees = (a, b) => !firstHit(a.x, a.y, b.x, b.y, segs).hit;
+    const angTo2 = (a, b) => deg(Math.atan2(b.y - a.y, b.x - a.x));
+    const inCone = (a, facing, b, range) => Math.hypot(b.x-a.x, b.y-a.y) <= range && Math.abs(angDiff(facing, angTo2(a, b))) <= CONE_DEG/2;
+    const lineClear = (sh, a, b) => { for(const q of people){ if(q===sh || q.k==='h') continue; const o = P.get(q.id); if(distSeg(o.x, o.y, a.x, a.y, b.x, b.y) < ENG.ffR) return false; } return true; };
+    for(const f of FR){ const me = P.get(f.id), base = poseBase(f, t).r, isFree = t >= freeT.get(f.id), job = busy.get(f.id);
+      let want = null, kind = 0;
+      // 1. a bad guy: keep tracking the one he's on, or pick up the nearest one in his cone
+      let tg = target.get(f.id); if(tg && !(tg.k==='h' && alive(tg, t) && sees(me, P.get(tg.id)) && Math.hypot(P.get(tg.id).x-me.x, P.get(tg.id).y-me.y) <= ENG.range)) tg = null;
+      if(!tg){ const look = isFree ? cur.get(f.id) : base; let bd = 1e9;
+        // moving in he only takes what's in front of him; once he's set in the room he picks up any bad guy he can see
+        for(const h of HO){ if(!alive(h, t)) continue; const hp = P.get(h.id); if(!(isFree ? Math.hypot(hp.x-me.x, hp.y-me.y) <= ENG.coverRange : inCone(me, look, hp, ENG.range)) || !sees(me, hp)) continue; const d = Math.hypot(hp.x-me.x, hp.y-me.y); if(d < bd){ bd = d; tg = h; } } }
+      if(tg){ want = angTo2(me, P.get(tg.id)); kind = 1; }
+      // 2. walking up to / holding a civilian he's detaining
+      else if(job && t >= job.t0 && t < job.done){ want = angTo2(me, P.get(job.c.id)); kind = 3; }
+      // 3. done with his moves: cover a civilian in his cone
+      else if(isFree){ let best = target.get(f.id); if(best && !(best.k==='c' && free(best, t) && sees(me, P.get(best.id)) && Math.hypot(P.get(best.id).x-me.x, P.get(best.id).y-me.y) <= ENG.coverRange)) best = null;
+        if(!best){ let bd = 1e9; for(const c of CV){ if(!free(c, t)) continue; const cp = P.get(c.id); if(!inCone(me, cur.get(f.id), cp, ENG.coverRange) || !sees(me, cp)) continue; const d = Math.hypot(cp.x-me.x, cp.y-me.y); if(d < bd){ bd = d; best = c; } } }
+        if(best){ tg = best; want = angTo2(me, P.get(best.id)); kind = 2; } }
+      target.set(f.id, tg || null);
+      // turn toward it at a natural speed; with nothing to look at he follows his plan
+      let r = cur.get(f.id); const goal = want==null ? base : want, step = TURN_RATE*dt, d = angDiff(r, goal);
+      r = Math.abs(d) <= step ? goal : (r + Math.sign(d)*step + 360) % 360; cur.set(f.id, r); face.get(f.id)[i] = r; lock.get(f.id)[i] = kind;
+      // shoot: seen long enough, muzzle on, nobody in the way
+      if(kind===1){ const key = f.id+'>'+tg.id; if(!seen.has(key)) seen.set(key, t); const hp = P.get(tg.id);
+        if(!out.down.has(tg.id) && t - seen.get(key) >= ENG.react && Math.abs(angDiff(r, angTo2(me, hp))) <= ENG.aimTol && lineClear(f, me, hp)){
+          out.shots.push({by:f.id, at:tg.id, t, x0:me.x, y0:me.y, x1:hp.x, y1:hp.y}, {by:f.id, at:tg.id, t:t + ENG.pair, x0:me.x, y0:me.y, x1:hp.x, y1:hp.y});
+          out.down.set(tg.id, t + 0.05); last = Math.max(last, t + 1.2);
+          if(HO.every(h => out.down.has(h.id))) allDown = Math.max(...HO.map(h => out.down.get(h.id))); } }
+      else for(const k of [...seen.keys()]) if(k.startsWith(f.id+'>')) seen.delete(k);
+    }
+    // all bad guys down: the room is safe to detain
+    if(t >= allDown && CV.length){
+      if(!out.call){ for(const f of FR){ if(t < freeT.get(f.id)) continue; const me = P.get(f.id);
+          if(CV.some(c => free(c, t) && sees(me, P.get(c.id)) && Math.hypot(P.get(c.id).x-me.x, P.get(c.id).y-me.y) <= ENG.coverRange)){ out.call = {t, by:f.id}; last = Math.max(last, t + ENG.call); break; } } }
+      if(out.call && t >= out.call.t + ENG.call){
+        for(const c of CV){ if(out.det.has(c.id)) continue; const cp = P.get(c.id);
+          let best = null, bd = 1e9;
+          for(const f of FR){ if(t < freeT.get(f.id)) continue; const job = busy.get(f.id); if(job && t < job.done) continue; const me = P.get(f.id), d = Math.hypot(cp.x-me.x, cp.y-me.y);
+            if(d > ENG.coverRange || !sees(me, cp)) continue; if(d < bd){ bd = d; best = f; } }
+          if(!best) continue;
+          // he walks up to about 3 ft (a spot he can actually get to, clear of everyone else), orders him down,
+          // and once the civilian is on his knees closes in behind him and puts a hand on him
+          const me = P.get(best.id), base = Math.atan2(me.y-cp.y, me.x-cp.x);
+          let spot = null;
+          for(let k=0;k<16 && !spot;k++){ const a = base + (k%2 ? 1 : -1)*Math.ceil(k/2)*Math.PI/8, cand = {x:cp.x + Math.cos(a)*ENG.standoff, y:cp.y + Math.sin(a)*ENG.standoff};
+            if(legBlock({x:me.x, y:me.y}, cand) || legBlock(cand, {x:cp.x, y:cp.y})) continue;
+            if(people.some(q => q!==best && q!==c && Math.hypot(P.get(q.id).x-cand.x, P.get(q.id).y-cand.y) < 1.3/FT)) continue;
+            spot = cand; }
+          if(!spot) continue;   // can't get to him from here: someone else will, or he stays with his hands up
+          const walk = Math.hypot(spot.x-me.x, spot.y-me.y)*FT/ENG.walk, t1 = t + walk, tk = t1 + 0.5;
+          const ux = (spot.x-cp.x)/ENG.standoff, uy = (spot.y-cp.y)/ENG.standoff, close = {x:cp.x + ux*ENG.hands, y:cp.y + uy*ENG.hands};
+          const t2 = tk + ENG.kneel + ENG.behind, t3 = t2 + (ENG.standoff - ENG.hands)*FT/2.5, t4 = t3 + ENG.cuff;
+          if(!out.dpath.has(best.id)) out.dpath.set(best.id, []);
+          const d0 = poseBase(best, t).dist||0, L1 = Math.hypot(spot.x-me.x, spot.y-me.y)*FT;
+          out.dpath.get(best.id).push({t0:t, t1, ax:me.x, ay:me.y, bx:spot.x, by:spot.y, d0}, {t0:t2, t1:t3, ax:spot.x, ay:spot.y, bx:close.x, by:close.y, d0:d0 + L1});
+          // the civilian turns his back to the man taking him: facing away along the line between them
+          out.det.set(c.id, {t0:t, tk, tb:tk + ENG.kneel, tc:t3, tcuff:t4, by:best.id, face:(deg(Math.atan2(cp.y-spot.y, cp.x-spot.x)) + 360) % 360});
+          busy.set(best.id, {c, t0:t, done:t4}); last = Math.max(last, t4 + 1.5); } }
+    }
+    if(t > sc.end + 2 && t > last && (allDown <= t || !HO.some(h => alive(h, t))) && CV.every(c => out.det.has(c.id))) { out.n = i + 1; break; }
+  }
+  out.face = face; out.lock = lock; out.end = last; return out;
+}
+function poseAt(it, t){
+  const p = poseBase(it, t); if(!isPerson(it)) return p;
+  const M = sim(); if(!M.n){ if(it.k!=='f' && stunnedAt(it, t)){ p.stun = true; if(it.k==='h') p.g = 0; } return p; }
+  if(it.k==='h'){ const td = M.down.get(it.id); if(td!=null && t >= td){ const q = poseBase(it, td); q.down = clamp((t - td)/0.45, 0, 1); q.v = 0; q.moving = false; q.sig = null; return q; }
+    if(stunnedAt(it, t)){ p.stun = true; p.g = 0; } return p; }
+  if(it.k==='c'){ const d = M.det.get(it.id); if(d && t >= d.t0){ const q = poseBase(it, d.t0), by = getItem(d.by), bp = by ? poseBase(by, t) : null;
+      // hands up and facing the man giving the commands; once told to kneel he turns away from him
+      if(t < d.tk - 0.3){ const dp = M.dpath.get(d.by), seg = dp && dp.filter(s => s.t0 <= t).pop(); const fx = seg ? seg.ax + (seg.bx-seg.ax)*clamp((t-seg.t0)/Math.max(1e-6, seg.t1-seg.t0), 0, 1) : (bp ? bp.x : q.x), fy = seg ? seg.ay + (seg.by-seg.ay)*clamp((t-seg.t0)/Math.max(1e-6, seg.t1-seg.t0), 0, 1) : (bp ? bp.y : q.y);
+        q.r = angTo(q.x, q.y, {x:fx, y:fy}); }
+      else q.r = d.face;
+      q.hands = t < d.tb ? 1 : 2; q.kneel = clamp((t - d.tk)/ENG.kneel, 0, 1); q.detained = t >= d.tk; q.cuffed = t >= d.tcuff; q.v = 0; q.moving = false; q.sig = null; return q; }
+    if(stunnedAt(it, t)) p.stun = true; return p; }
+  const i = clamp(Math.round(t/ENG.dt), 0, M.n - 1), fa = M.face.get(it.id);
+  if(fa && t < M.n*ENG.dt){ p.r = fa[i]; const k = M.lock.get(it.id)[i]; if(k===1) p.g = 2; else if(k===2 || k===3) p.g = 0; }
+  for(const [cid, d] of M.det) if(d.by===it.id && t >= d.tc && t < d.tcuff){ p.sig = {s:'ctrl', to:cid, t0:d.tc, t1:d.tcuff, quiet:true}; p.g = 0; }
+  const dp = M.dpath.get(it.id); if(dp){ const a = dp.filter(s => t >= s.t0).pop(); if(a){ const f = clamp((t - a.t0)/Math.max(1e-6, a.t1 - a.t0), 0, 1), L = Math.hypot(a.bx-a.ax, a.by-a.ay)*FT;
+      p.x = a.ax + (a.bx-a.ax)*f; p.y = a.ay + (a.by-a.ay)*f; p.moving = f < 1; p.v = f < 1 ? ENG.walk : 0; p.vn = ENG.walk; p.dist = a.d0 + L*f; } }
+  return p;
+}
 function flaggingWho(it, ps, t, poseOf){
   if(it.k!=='f' || S.flagRule===false) return null;
   const ux = Math.cos(rad(ps.r)), uy = Math.sin(rad(ps.r));
@@ -1529,7 +1662,7 @@ function drawPlan(){
   }
   // view cones: the slice of what each person can see in the direction they face
   if(conesOn){
-    for(const it of S.items){ if(!isPerson(it)) continue; const ps = poses.get(it.id), v = visAt(ps.x, ps.y, EYE[it.p?1:0]); if(v.length<3) continue;
+    for(const it of S.items){ if(!isPerson(it)) continue; const ps = poses.get(it.id); if(ps.down || ps.detained) continue; const v = visAt(ps.x, ps.y, EYE[it.p||ps.kneel?1:0]); if(v.length<3) continue;
       const a = rad(ps.r), h = rad(CONE_DEG/2);
       ctx.save(); ctx.beginPath(); ctx.moveTo(ps.x,ps.y); ctx.arc(ps.x, ps.y, CONE_LEN, a-h, a+h); ctx.closePath(); ctx.clip();
       polyPath(v); ctx.fillStyle = pColor(it,C); ctx.globalAlpha = 0.16; ctx.fill();
@@ -1731,10 +1864,24 @@ function drawPlan(){
       pill(q.x, q.y + R0 + 14, `${tagOf(sp.q)} ${sp.t0.toFixed(1)}–${sp.t1===Infinity ? 'end' : sp.t1.toFixed(1)}s`, both ? C.hostile : C.ink2, '#ffffff'); }
     if(D.win){ const q = toScreen(D.x, D.y); pill(q.x, q.y - R0 - 16, `${tagOf(D.it)} ${D.win.t0.toFixed(1)}–${D.win.t1===Infinity ? 'end' : D.win.t1.toFixed(1)}s`, C.accent, tok('--accent-ink')); } }
 
+  // wander bubbles: where a hostile or civilian roams once his route is done
+  for(const it of S.items){ if(!isPerson(it) || !it.wd) continue; const m = SC2.map.get(it.id); if(!m) continue;
+    const w0 = m.ph.find(q => q.wander), c = w0 ? w0.A : {x:m.ph[m.ph.length-1].x, y:m.ph[m.ph.length-1].y}, q = toScreen(c.x, c.y), on = selPerson()===it;
+    ctx.strokeStyle = pColor(it, C); ctx.globalAlpha = on ? 0.8 : 0.35; ctx.lineWidth = 1.5; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.arc(q.x, q.y, it.wd.r/FT*sc, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  // shots: a short tracer from shooter to target and a flash at the muzzle
+  { const M = sim(); for(const sh of M.shots){ if(TIME < sh.t || TIME > sh.t + 0.14) continue; const by = getItem(sh.by), at = getItem(sh.at); if(!by || !at) continue;
+      const a = poses.get(by.id), b = poses.get(at.id); if(!a || !b) continue; const p0 = toScreen(a.x, a.y), p1 = toScreen(b.x, b.y);
+      ctx.strokeStyle = '#f2b233'; ctx.lineWidth = 2.5; ctx.globalAlpha = 1 - (TIME - sh.t)/0.14; ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+      ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(p0.x + (p1.x-p0.x)*0.12, p0.y + (p1.y-p0.y)*0.12, R0*0.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; } }
   // people
   for(const it of S.items){ if(!isPerson(it)) continue;
+    { const ps = poses.get(it.id);
+      if(ps.down){ const s = toScreen(ps.x, ps.y), R = R0, k = R*0.9;   // down: greyed out with an X
+        ctx.globalAlpha = 0.55; ctx.fillStyle = C.dead; const q = R*1.28; ctx.beginPath(); ctx.moveTo(s.x,s.y-q); ctx.lineTo(s.x+q,s.y); ctx.lineTo(s.x,s.y+q); ctx.lineTo(s.x-q,s.y); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 1; ctx.strokeStyle = C.hostile; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(s.x-k,s.y-k); ctx.lineTo(s.x+k,s.y+k); ctx.moveTo(s.x+k,s.y-k); ctx.lineTo(s.x-k,s.y+k); ctx.stroke();
+        hits.push({kind:'item', it, x:s.x, y:s.y, rx:R+8, ry:R+8}); continue; } }
     const ps = poses.get(it.id), armed = it.k!=='c', flagged = armed && flaggingWho(it, ps, TIME, q => poses.get(q.id)), sg = armed ? sigGun(ps.sig) : null, gs = !armed ? 2 : (sg===1 || sg===0) ? sg : flagged ? 1 : sg===3 ? 3 : ps.g;
-    const s = toScreen(ps.x,ps.y), R = R0*(it.p?0.82:1), col = pColor(it,C);
+    const s = toScreen(ps.x,ps.y), R = R0*(it.p || ps.kneel > 0.5 ? 0.82 : 1), col = pColor(it,C);
     const a = rad(ps.r||0), dx = Math.cos(a), dy = Math.sin(a), tip = armed ? GUN_TIP[gs] : 1.9;
     ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = gs===2 && armed ? 2.8 : 2.2;
     if(gs===0 && armed) ctx.setLineDash([3,3]);
@@ -1753,7 +1900,8 @@ function drawPlan(){
     else if(it.k==='h'){ const q=R*1.28; ctx.moveTo(s.x,s.y-q); ctx.lineTo(s.x+q,s.y); ctx.lineTo(s.x,s.y+q); ctx.lineTo(s.x-q,s.y); ctx.closePath(); }
     else { const q=R*0.92; ctx.rect(s.x-q,s.y-q,q*2,q*2); }
     ctx.fill(); ctx.strokeStyle = C.sheet; ctx.lineWidth = 1.6; ctx.stroke();
-    if(it.p){ ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(s.x-R, s.y+R*1.5); ctx.lineTo(s.x+R, s.y+R*1.5); ctx.stroke(); }
+    if(it.p || ps.kneel > 0.5){ ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(s.x-R, s.y+R*1.5); ctx.lineTo(s.x+R, s.y+R*1.5); ctx.stroke(); }
+    if(ps.hands) pill(s.x, s.y + R*2.6, ps.cuffed ? 'CUFFED' : ps.detained ? 'ON HIS KNEES' : 'HANDS UP', C.civ, '#ffffff');
     if(it.l){ ctx.fillStyle = '#ffffff'; ctx.font = `700 ${Math.round(R*(it.l.length>2?0.8:1.05))}px "Barlow Condensed", sans-serif`; ctx.fillText(it.l.slice(0,4), s.x, s.y+0.5); }
     if(armed && GUN_TAG[gs]){ const fs = Math.max(9, Math.round(R*0.7)); ctx.font = `700 ${fs}px "Barlow Condensed", sans-serif`; ctx.textAlign = 'left';
       const bx = s.x - dx*R*1.2 + R*0.7, by = s.y - dy*R*1.2 + R*1.25;
@@ -1771,9 +1919,13 @@ function drawPlan(){
     hits.push({kind:'item', it, x:s.x, y:s.y, rx:R+8, ry:R+8});
   }
 
+  // "Clear, detain" call, and the detainer's commands while he walks up
+  { const M = sim(), call = M.call; if(call && TIME >= call.t && TIME < call.t + ENG.call){ const by = getItem(call.by), q = by && poses.get(by.id); if(q){ const s = toScreen(q.x, q.y); pill(s.x, s.y - R0*2.4, 'CLEAR · DETAIN', C.accent, tok('--accent-ink')); } }
+    for(const [cid, d] of M.det){ if(TIME < d.t0 || TIME > d.tcuff) continue; const by = getItem(d.by), q = by && poses.get(by.id); if(!q) continue; const s = toScreen(q.x, q.y);
+      pill(s.x, s.y - R0*2.4, TIME < d.tk - 0.6 ? 'HANDS! DON’T MOVE' : TIME < d.tb ? 'ON YOUR KNEES' : TIME < d.tc ? 'HANDS BEHIND YOUR BACK' : 'CUFFING', pColor(by, C), '#ffffff'); } }
   // signals between teammates and gates opening
   for(const it of S.items){ if(!isPerson(it)) continue; const ps = poses.get(it.id), s = toScreen(ps.x, ps.y), col = pColor(it,C);
-    if(ps.sig){ const to = ps.sig.to && getItem(ps.sig.to);
+    if(ps.sig && !ps.sig.quiet){ const to = ps.sig.to && getItem(ps.sig.to);
       if(to){ const q = poses.get(to.id), qs = toScreen(q.x, q.y); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(qs.x,qs.y); ctx.stroke(); ctx.setLineDash([]);
         ctx.beginPath(); ctx.arc(qs.x, qs.y, R0*1.9, 0, 7); ctx.stroke(); }
       pill(s.x, s.y - R0*2.4, (ps.sig.txt || SIG_LABEL[ps.sig.s] || 'Signal').toUpperCase() + (to ? ' → ' + (to.l ? '#'+to.l : KIND[to.k]) : ''), col, '#ffffff'); }
@@ -2328,6 +2480,7 @@ function renderInspector(){
       <div class="insp-row"><label for="insp-label">Tag</label><input type="text" id="insp-label" maxlength="4" value="${esc(it.l)}" placeholder="1, TL, A…"></div>
       ${it.k!=='c' ? `<div class="insp-row"><span class="lbl">Gun at start</span>${seg('gun0', GUN_SHORT.map((g,i)=>[i,g]), it.g||0, 'sm')}</div>` : ''}
       <div class="insp-row"><span class="lbl">Posture</span>${seg('pose', [[0,'Standing'],[1,'Kneeling']], it.p?1:0)}</div>
+      ${it.k!=='f' ? `<div class="insp-row"><span class="lbl">Wander</span>${seg('wander', [[0,'Off'],[6,'6 ft'],[10,'10 ft'],[15,'15 ft']], it.wd ? it.wd.r : 0, 'sm')}${it.wd ? '<button class="btn sm" data-act="reroll">Reroll</button>' : ''}<span class="small tip">${it.wd ? 'After his route he walks and pauses at random inside the circle. Same every time you play; Reroll for a new pattern.' : 'Let him roam at random inside a circle once his route is done.'}</span></div>` : ''}
       ${stuckNote(it)}
       ${actsEditor(it, it, -1)}
       <div class="insp-row"><span class="lbl">Route</span><div class="row"><button class="btn ${tool==='path'?'on':''}" data-act="draw">${n?'Add to route':'Draw route'}</button>${n?'<button class="btn" data-act="wpfirst">Edit waypoints</button><button class="btn" data-act="rclear">Clear route</button>':''}</div></div>
@@ -2416,6 +2569,8 @@ insp.addEventListener('click', e => {
     if(act==='pose') it.p = +v;
     else if(act==='rot') it.r = ((it.r||0) + (+v) + 360) % 360;
     else if(act==='gun0') it.g = +v;
+    else if(act==='wander'){ if(+v) it.wd = {r:+v, seed:(it.wd && it.wd.seed) || (Math.random()*4294967295)>>>0}; else delete it.wd; }
+    else if(act==='reroll'){ if(it.wd) it.wd.seed = (Math.random()*4294967295)>>>0; }
     else if(act==='rclear') delete it.path;
     else if(act==='del'){ S.items = S.items.filter(i=>i!==it); sel=null; validateSel(); }
   } else if(sel.type==='wp'){
@@ -2749,6 +2904,7 @@ function buildFigure(kit, it, idx, col){
     const gunMat = M.gun, P = (x,y,z) => [x - 0.25, y - 4.5, z - 0.22];  // body coords → pivot coords
     add(pivot, G.stock, gunMat, -0.05, -0.02, 0); add(pivot, G.receiver, gunMat, 0.55, 0, 0); add(pivot, G.rail, f ? M.gunTan : gunMat, 1.3, 0.01, 0);
     add(pivot, G.barrel, gunMat, 1.88, 0.02, 0); add(pivot, G.muzzle, gunMat, 2.15, 0.02, 0);
+    var flash = new THREE.Mesh(G.joint, new THREE.MeshBasicMaterial({color:'#ffd36b', transparent:true, opacity:0.95})); flash.position.set(2.6, 0.02, 0); flash.scale.set(0.55, 0.32, 0.32); flash.visible = false; pivot.add(flash);
     const mag = add(pivot, G.mag, gunMat, 0.72, -0.28, 0); mag.rotation.z = 0.18; const grip = add(pivot, G.grip, gunMat, 0.3, -0.2, 0); grip.rotation.z = 0.35;
     add(pivot, G.optic, M.optic, 0.62, 0.2, 0); add(pivot, G.hand, M.lens, 0.79, 0.2, 0).scale.set(0.5, 0.5, 0.5);
     const gripPt = [0.3, -0.18, 0], handguard = [1.25, -0.06, 0];
@@ -2759,14 +2915,17 @@ function buildFigure(kit, it, idx, col){
     armL.elbow.scale.set(0.135, 0.135, 0.135);
     body.add(armL.up, armL.fore, armL.hand, armL.elbow); void sL; void eL;
   } else {
-    for(const [s, z] of [[shoulderR, 0.55], [shoulderL, -0.55]]){ const el = [0.05, 3.85, z], hd = [0.12, 3.15, z*0.95];
-      body.add(limb(kit, s, el, 0.13, top)); body.add(limb(kit, el, hd, 0.11, skin)); add(body, G.hand, skin, ...hd); ball(body, top, ...el, 0.125); }
+    // two-jointed arms posed every frame (hanging, hands up, hands to his face, hands behind his back)
+    var arms = [];
+    for(const [s, z] of [[shoulderR, 0.55], [shoulderL, -0.55]]){
+      const a = {side:Math.sign(z), sh:V3(...s), rest:V3(0.12, 3.15, z*0.95), up:new THREE.Mesh(G.limb, top), fore:new THREE.Mesh(G.limb, skin), hand:new THREE.Mesh(G.hand, skin), elbow:new THREE.Mesh(G.joint, top)};
+      a.elbow.scale.set(0.125, 0.125, 0.125); body.add(a.up, a.fore, a.hand, a.elbow); arms.push(a); }
   }
   // affiliation ring at his feet
   const ring = new THREE.Mesh(G.ring, new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.9, side:THREE.DoubleSide, depthWrite:false}));
   ring.rotation.x = -Math.PI/2; ring.position.y = 0.05; g.add(ring);
   g.traverse(o => { if(o.isMesh && o!==ring){ o.castShadow = true; } });
-  return {g, body, head, pivot, L, R, armL, gait:{ph:0, amp:0}, lean:0};
+  return {g, body, head, pivot, L, R, armL, flash: armed ? flash : null, arms: armed ? null : arms, gait:{ph:0, amp:0}, lean:0};
 }
 // standing, walking stride, or kneeling on the right knee
 // Walking with planted feet: each foot stays put on the floor while the body passes over it (so nothing slides),
@@ -2780,7 +2939,7 @@ function legIK(dx, dy){   // hip → ankle offset in the leg's plane (dx forward
   return [a + b, -(Math.PI - k)];
 }
 function poseFigure(p, ps, gstate){
-  const kneel = !!p.it.p, B = p.body;
+  const kneel = !!p.it.p || ps.kneel > 0.5, B = p.body;
   if(kneel){ B.position.y = -1.25; p.L.hip.rotation.z = 1.45; p.L.knee.rotation.z = -1.5; p.R.hip.rotation.z = -0.15; p.R.knee.rotation.z = -1.45;
     if(p.L.foot){ p.L.foot.rotation.z = 0.05; p.R.foot.rotation.z = 1.1; } p.gait = {ph:0, amp:0}; p.lean = 0; return; }
   const aim = gstate===2 && p.it.k!=='c', v = ps.v || 0, vn = ps.vn || v || 5;
@@ -2840,6 +2999,9 @@ function animateActions(p, ps, byId, now){
       const kx = s.hx+(s.ex-s.hx)*0.84, ky = s.hy+(s.ey-s.hy)*0.84, nx = -(s.ey-s.hy), ny = s.ex-s.hx, n = Math.hypot(nx,ny)||1;
       const k1 = B.worldToLocal(V3((kx+nx/n*0.06)*FT, 3, (ky+ny/n*0.06)*FT)), k2 = B.worldToLocal(V3((kx-nx/n*0.06)*FT, 3, (ky-ny/n*0.06)*FT));
       target = k1.distanceTo(shoulder) < k2.distanceTo(shoulder) ? k1 : k2; w = clamp(Math.min((TIME - sig.t0)/0.3, (sig.t1 - TIME)/0.25), 0, 1); busy = true; }
+    else if(sig.s==='ctrl' && sig.to && byId[sig.to]){ const q = byId[sig.to]; q.g.updateMatrixWorld(true);   // cuffing: his hand on the man's wrists behind his back, a couple of taps
+      const tap = 0.08*Math.abs(Math.sin((TIME - sig.t0)*Math.PI*2.2));
+      target = B.worldToLocal(q.body.localToWorld(V3(-0.5, 3.55 + tap, 0))); w = Math.min(clamp((TIME - sig.t0)/0.3, 0, 1), clamp((sig.t1 - TIME)/0.25, 0, 1)); busy = true; }
     else if(sig.s==='bcall'){ busy = true;   // flashbang call: arm straight up, fist opens and closes three times
       const pump = Math.abs(Math.sin(Math.PI*3*f)); target = V3(-0.05, 6.1 + 0.12*pump, -0.45); A.hand.scale.setScalar(1 + 0.5*pump);
       w = sig.to ? clamp((TIME - sig.t0)/0.25, 0, 1) : sigBlend(sig, TIME, 0.25, 0.25); }   // in a stack the fist stays up
@@ -2858,6 +3020,7 @@ function animateActions(p, ps, byId, now){
       if(f < 0.55) target = rest.clone().lerp(back, easeIO(f/0.55)); else if(f < 0.75) target = back.clone().lerp(fwd, easeIO((f-0.55)/0.2)); else target = fwd.clone().lerp(rest, easeIO((f-0.75)/0.25));
       w = 1; }
   }
+  if(!sig && p.stunPose > 0.01){ target = V3(0.38, 5.25, -0.12); w = p.stunPose; }   // flashed: support hand over his eyes
   const hand = rest.clone().lerp(target, w);
   // two-bone IK: upper arm and forearm 1.0 ft each, elbow bends down and out
   const L1 = 1.0, L2 = 1.0, toH = hand.clone().sub(shoulder); let dd = toH.length();
@@ -2958,7 +3121,7 @@ function build3D(){
     root.add(fig.g);
     const tag = it.l || (it.k==='h'?'H':it.k==='c'?'C':'');
     let sp = null; if(tag){ sp = textSprite(tag.slice(0,4), '#ffffff', col); sp.scale.multiplyScalar(0.8); root.add(sp); }
-    T.people.push({it, g:fig.g, body:fig.body, L:fig.L, R:fig.R, pivot:fig.pivot, armL:fig.armL, sp, fan, head:fig.head, col, pitch:null, sigText:'', sigSp:null});
+    T.people.push({it, g:fig.g, body:fig.body, L:fig.L, R:fig.R, pivot:fig.pivot, armL:fig.armL, flash:fig.flash, arms:fig.arms, sp, fan, head:fig.head, col, pitch:null, sigText:'', sigSp:null});
   });
   for(const it of S.items){ if(it.k!=='label' || !it.l) continue; const sp = textSprite(it.l.toUpperCase(), C.ink, C.bg); sp.position.set(it.x*FT, 9.6, it.y*FT); sp.scale.multiplyScalar(1.15); root.add(sp); }
   for(const a of S.arrows){
@@ -2980,6 +3143,8 @@ function build3D(){
     m.position.set(k.p[0], Math.max(0.5,k.p[1]), k.p[2]); m.lookAt(k.g[0], k.g[1], k.g[2]); T.camPath.add(m);
     const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute([k.p[0],Math.max(0.5,k.p[1]),k.p[2], k.p[0]+(k.g[0]-k.p[0])*0.15, k.p[1]+(k.g[1]-k.p[1])*0.15, k.p[2]+(k.g[2]-k.p[2])*0.15],3));
     T.camPath.add(new THREE.Line(lg, new THREE.LineBasicMaterial({color:C.accent}))); }
+  // shot tracers (a pool, reused frame to frame)
+  T.tracers = []; for(let i=0;i<8;i++){ const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 6), new THREE.MeshBasicMaterial({color:'#ffcf5a', transparent:true, opacity:0.95})); m.visible = false; root.add(m); T.tracers.push(m); }
   T.bangs = [];
   const gCan = new THREE.CylinderGeometry(0.13, 0.13, 0.45, 10), canMat = new THREE.MeshLambertMaterial({color:'#3d4a35'}), gPuff = new THREE.SphereGeometry(1, 12, 10);
   for(const p of bangPaths()){
@@ -3018,14 +3183,14 @@ function updateDyn(dt){
     if(p.sp) p.sp.position.set(ps.x*FT, p.it.p?5.6:7.3, ps.y*FT);
     { const fl0 = p.pivot ? flaggingWho(p.it, ps, TIME, q => poseAt(q, TIME)) : false, sg0 = sigGun(ps.sig); p.gstate = !p.pivot ? 2 : (sg0===1 || sg0===0) ? sg0 : fl0 ? 1 : sg0===3 ? 3 : ps.g; }
     poseFigure(p, ps, p.gstate); if(ps.moving) busy = busy || playing;
-    p.fan.visible = conesOn; if(T.routes) T.routes.visible = routesOn;
-    const st = ps.sig ? (ps.sig.txt || SIG_LABEL[ps.sig.s] || 'Signal') + (ps.sig.to && getItem(ps.sig.to) ? ' → ' + tagOf(getItem(ps.sig.to)) : '') : '';
+    p.fan.visible = conesOn && !ps.down && !ps.detained; if(T.routes) T.routes.visible = routesOn;
+    const st = ps.sig && !ps.sig.quiet ? (ps.sig.txt || SIG_LABEL[ps.sig.s] || 'Signal') + (ps.sig.to && getItem(ps.sig.to) ? ' → ' + tagOf(getItem(ps.sig.to)) : '') : '';
     if(st !== p.sigText){ if(p.sigSp){ T.root.remove(p.sigSp); p.sigSp.material.map.dispose(); p.sigSp.material.dispose(); p.sigSp = null; }
       p.sigText = st; if(st){ p.sigSp = textSprite(st, '#ffffff', p.col); p.sigSp.scale.multiplyScalar(0.9); T.root.add(p.sigSp); } }
     if(p.sigSp) p.sigSp.position.set(ps.x*FT, (p.it.p?5.6:7.3) + 1.3, ps.y*FT);
     if(ps.sig && ps.sig.s==='nod'){ p.head.rotation.z = -Math.abs(Math.sin(now*7))*0.45; busy = true; } else p.head.rotation.z = 0;
     if(p.pivot){
-      const gstate = p.gstate, want = GUN_PITCH[gstate], room = Math.max(0, gunRoom(ps) - 4.5*Math.sin(Math.max(0, -(p.lean||0))));
+      const gstate = p.gstate, want = p.stunPose > 0.5 ? -0.95 : GUN_PITCH[gstate], room = Math.max(0, gunRoom(ps) - 4.5*Math.sin(Math.max(0, -(p.lean||0))));
       if(p.pitch===null) p.pitch = gunPitchFor(want, room, null);
       const target = gunPitchFor(want, room, p.pitch);
       // getting out of a wall is quick (a flick of the muzzle); settling back is the usual easy move
@@ -3047,6 +3212,33 @@ function updateDyn(dt){
   { const byId = {}; for(const p of T.people) byId[p.it.id] = p; for(const p of T.people){ const ps = poseAt(p.it, TIME); if(animateActions(p, ps, byId, now)) busy = true; } }
   // last check, on the finished pose (lean, actions and all): if any part of the rifle still touches a surface, tip it further
   { const byId = {}; for(const p of T.people) byId[p.it.id] = p; for(const p of T.people) if(p.pivot && p.gstate!==3) gunUnclip(p, byId, now); }
+  // down: he falls flat over half a second. Shooting: a flash at the muzzle for each round.
+  { const M = sim();
+    for(const p of T.people){ const ps = poseAt(p.it, TIME);
+      if(ps.down){ const e = easeIO(ps.down); p.body.rotation.z = 1.5*e; p.body.position.y = 0.35*e; if(ps.down < 1) busy = true; }
+      if(p.flash){ const on = M.shots.some(sh => sh.by===p.it.id && TIME >= sh.t && TIME < sh.t + 0.09); p.flash.visible = on; if(M.shots.some(sh => sh.by===p.it.id && Math.abs(TIME - sh.t) < 0.3)) busy = busy || playing; }
+      // flashed: a hostile puts his support hand over his eyes and lets the rifle hang; the hand goes back as it wears off
+      { const st = ps.stun ? 1 : 0; p.stunPose = p.stunPose==null ? st : p.stunPose + (st - p.stunPose)*Math.min(1, dt*10); if(Math.abs(st - p.stunPose) > 0.01 || st) busy = busy || playing; }
+      // civilians' hands: hanging, up when told, over the face when flashed, behind the back when he's being cuffed
+      if(p.arms){ const mode = ps.hands===2 ? 'back' : ps.hands ? 'up' : ps.stun ? 'face' : 'rest';
+        p.armMode = p.armMode || mode; if(p.armMode!==mode){ p.armFrom = p.armHand ? p.armHand.map(v => v.clone()) : null; p.armMode = mode; p.armT = 0; }
+        p.armT = Math.min(1, (p.armT==null ? 1 : p.armT) + dt*3); if(p.armT < 1) busy = true;
+        const goal = a => mode==='up' ? V3(0.2, 6.15, a.side*0.72) : mode==='face' ? V3(0.4, 5.3, a.side*0.13) : mode==='back' ? V3(-0.5, 3.55, a.side*0.1) : a.rest.clone();
+        const bendOf = a => mode==='up' ? V3(0.1, -0.4, a.side) : mode==='face' ? V3(0.2, -1, a.side*0.7) : mode==='back' ? V3(-0.2, -0.4, a.side) : V3(-0.1, 0, a.side);
+        p.armHand = p.arms.map((a, k) => { const g = goal(a), from = p.armFrom && p.armFrom[k]; return from ? from.clone().lerp(g, easeIO(p.armT)) : g; });
+        p.arms.forEach((a, k) => { const L1 = 0.8, L2 = 0.75, toH = p.armHand[k].clone().sub(a.sh); let dd = toH.length();
+          if(dd > L1 + L2 - 0.02){ toH.setLength(L1 + L2 - 0.02); dd = toH.length(); }
+          const handP = a.sh.clone().add(toH), dir = toH.clone().normalize(), mid = a.sh.clone().add(toH.clone().multiplyScalar(0.5));
+          let bend = bendOf(a); bend.sub(dir.clone().multiplyScalar(bend.dot(dir))); if(bend.lengthSq() < 1e-6) bend = V3(0, -1, 0); bend.normalize();
+          const hgt = Math.sqrt(Math.max(0, L1*L1 - (dd/2)*(dd/2))), elbow = mid.add(bend.multiplyScalar(hgt));
+          setLimb(a.up, a.sh, elbow, 0.13); setLimb(a.fore, elbow, handP, 0.11); a.hand.position.copy(handP); a.elbow.position.copy(elbow); }); } }
+    // tracers: from his muzzle to the target's chest for a moment after each round
+    let ti = 0; for(const m of (T.tracers||[])) m.visible = false;
+    for(const sh of M.shots){ if(TIME < sh.t || TIME > sh.t + 0.12 || ti >= (T.tracers||[]).length) continue;
+      const by = T.people.find(q => q.it.id===sh.by), at = T.people.find(q => q.it.id===sh.at); if(!by || !at || !by.pivot) continue;
+      by.g.updateMatrixWorld(true); const a = by.pivot.localToWorld(V3(2.4, 0.02, 0)), b = at.g.localToWorld(V3(0, 4.2, 0)), d = b.clone().sub(a), L = d.length();
+      const m = T.tracers[ti++]; m.visible = true; m.scale.set(1, L, 1); m.position.copy(a).add(b).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(V3(0,1,0), d.normalize());
+      m.material.opacity = 0.95*(1 - (TIME - sh.t)/0.12); busy = busy || playing; } }
   // the bang is in his hand from when he takes it off his kit until it leaves his hand
   for(const bb of (T.bangs||[])){ const p = bb.p; if(TIME >= p.t0 || p.t0 - TIME > 3) continue;
     const tp = T.people.find(q => q.it.id===p.by); if(!tp || !tp.armL) continue; const sg = poseAt(tp.it, TIME).sig;
@@ -4544,7 +4736,7 @@ function buildZipper(){
   changed();
   const order = plan.map(pl => pl.m.q), CLEAR = 1.2/FT, vOf = pt => o.h ? pt.y : pt.x;
   const firstMove = q => { const m = sched().map.get(q.id); return m ? m.ph.find(x => x.k==='m' && x.t1 > 0) : null; };
-  const scan = (q, test) => { const m = sched().map.get(q.id); if(!m) return null; for(let t = 0; t <= m.end + 0.05; t += 1/120){ const ps = poseAt(q, t); if(test(ps)) return t; } return null; };
+  const scan = (q, test) => { const m = sched().map.get(q.id); if(!m) return null; for(let t = 0; t <= m.end + 0.05; t += 1/120){ const ps = poseBase(q, t); if(test(ps)) return t; } return null; };
   const crosses = ps => (vOf(ps) - o.line)*side <= 0;
   for(let k=1;k<order.length;k++){
     const q = order[k], pq = order[k-1], from = plan[k].m.i, owner = from >= 0 ? q.path[from] : q;
@@ -4565,8 +4757,8 @@ function buildZipper(){
       // only from when he leaves his spot in the stack, and only at the doorway or inside: a tight stack outside is normal
       const leave = mine.ph.find(x => x.k==='m' && x.leg===from + 1), t0 = leave ? leave.t0 : 0; let tooClose = false;
       const atDoor = pt => (vOf(pt) - o.line)*side < 0.45;
-      for(let t=t0; t<=mine.end + 0.3 && !tooClose; t+=1/30){ const me = poseAt(q, t); if(!atDoor(me)) continue;
-        for(let j=0;j<k;j++){ const o2 = poseAt(order[j], t); if(atDoor(o2) && Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
+      for(let t=t0; t<=mine.end + 0.3 && !tooClose; t+=1/30){ const me = poseBase(q, t); if(!atDoor(me)) continue;
+        for(let j=0;j<k;j++){ const o2 = poseBase(order[j], t); if(atDoor(o2) && Math.hypot(me.x-o2.x, me.y-o2.y) < CLEAR){ tooClose = true; break; } } }
       if(!tooClose) break;
       a.d = r2(a.d + 0.05); changed(); } }
   // rifles in the fight: whatever he carried in the stack, each man brings his rifle up on target as he steps off for the door
