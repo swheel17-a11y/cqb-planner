@@ -102,7 +102,33 @@ body.ro .timeline{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
 .card-close:hover{border-color:var(--ink-2)}
 .card-close svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 #inspector .insp-head,#picker h3{padding-right:40px}
-#inspector .card-close{position:sticky;top:0;align-self:flex-end;margin-bottom:-42px;flex:none}
+#inspector .card-btns{position:sticky;top:0;align-self:flex-end;margin-bottom:-42px;flex:none;display:flex;gap:6px;z-index:2}
+#inspector .card-btns .card-close{position:static}
+.card-min{display:none;width:32px;height:32px;place-items:center;border:1px solid var(--line);border-radius:8px;background:var(--sheet);color:var(--ink)}
+.card-min svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.act-add-sel{display:none;width:100%;padding:7px 8px;border:1px dashed var(--ink-2);border-radius:7px;background:var(--sheet);color:var(--ink);font-weight:600;font-size:14px}
+/* Phone: the selection panel is a short, dense sheet so the plan above it stays usable. Long how-to lines are hidden,
+   the add-action buttons become one menu, and the fold button shrinks it to its title line. */
+@media (max-width:640px){
+  #inspector{max-height:32svh;bottom:6px;left:max(6px,env(safe-area-inset-left,0px));right:max(6px,env(safe-area-inset-right,0px));padding:16px 10px 8px;gap:6px;border-radius:10px}
+  #inspector .tip{display:none}
+  #inspector .insp-head{font-size:14px;gap:6px;padding-right:72px;min-height:28px}
+  #inspector .insp-head .note{font-size:12px}
+  #inspector .insp-row{gap:5px}
+  #inspector .insp-row>.lbl,#inspector .insp-row>label{min-width:46px;font-size:11.5px;letter-spacing:.05em}
+  #inspector .btn{padding:5px 9px;font-size:13px}
+  #inspector .btn.sm{padding:4px 7px;font-size:12.5px}
+  #inspector .seg button,#inspector .seg.sm button{padding:5px 7px;font-size:12.5px}
+  #inspector .small{font-size:12px}
+  #inspector .act-row{padding:5px 6px;gap:6px}
+  #inspector .act-ctl button{width:24px;height:24px}
+  #inspector .act-add .btn{display:none}
+  #inspector .act-add-sel{display:block}
+  #inspector .card-btns{margin-bottom:-34px;gap:4px}
+  #inspector .card-close,#inspector .card-min{width:28px;height:28px;display:grid}
+  #inspector.mini{max-height:none;padding-bottom:10px}
+  #inspector.mini>:not(.insp-head):not(.card-btns){display:none}
+}
 #vid-bar{width:100%;height:10px;accent-color:var(--accent)}
 #vid-preview{width:100%;max-height:50vh;border-radius:8px;background:#000}
 #flashfx{position:absolute;inset:0;background:#ffffff;opacity:0;pointer-events:none;z-index:1}
@@ -724,7 +750,7 @@ function updateUndo(){ $('#btn-undo').disabled = !undoStack.length; $('#btn-redo
 
 /* ---------------- save format ----------------
    person row: [kind, x, y, facing, tag, kneel, gun, startActions, route]
-   waypoint:   [x, y, speed ft/s, actions, lookWhileMovingX, lookWhileMovingY]
+   waypoint:   [x, y, speed ft/s, actions, lookWhileMovingX, lookWhileMovingY, bendX, bendY]  (bend = the curve's pull point for the leg into it)
    actions:    ['l',x,y,hold] look · ['g',gun] · ['w',secs] · ['s',signal,targetIndex,secs,label] · ['o',gate] open · ['q',gate] wait for · ['y',code] sync */
 function packActs(acts){
   if(!acts || !acts.length) return 0;
@@ -752,7 +778,9 @@ function toData(ro){
     i:S.items.map(it => { const row = [it.k, r2(it.x), r2(it.y), Math.round(it.r||0), it.l||'', it.p||0];
       if(isPerson(it) && (it.g || (it.acts && it.acts.length) || (it.path && it.path.length))){
         row.push(it.g||0, packActs(it.acts));
-        if(it.path && it.path.length) row.push(it.path.map(w => { const q = [r2(w.x), r2(w.y), w.sp||5, packActs(w.acts)]; if(w.lx!=null) q.push(r2(w.lx), r2(w.ly)); return q; }));
+        if(it.path && it.path.length) row.push(it.path.map(w => { const q = [r2(w.x), r2(w.y), w.sp||5, packActs(w.acts)];
+          if(w.lx!=null || w.cx!=null) q.push(w.lx!=null ? r2(w.lx) : null, w.lx!=null ? r2(w.ly) : null);
+          if(w.cx!=null) q.push(r2(w.cx), r2(w.cy)); return q; }));
       }
       return row; }),
     a:S.arrows.map(a => [r2(a.x1), r2(a.y1), r2(a.x2), r2(a.y2), a.c||0]),
@@ -828,7 +856,8 @@ function fromData(d){
         o.acts = unpackActs(it[7], num);
         if(Array.isArray(it[8])) o.path = it[8].filter(Array.isArray).slice(0,300).map(q => {
           const w = {x:num(q[0],0), y:num(q[1],0), sp:clamp(num(q[2],5),0.5,25), acts:unpackActs(q[3], num)};
-          if(q.length>=6 && q[4]!=null){ w.lx = num(q[4],w.x); w.ly = num(q[5],w.y); } return w; });
+          if(q.length>=6 && q[4]!=null){ w.lx = num(q[4],w.x); w.ly = num(q[5],w.y); }
+          if(q.length>=8 && q[6]!=null && Number.isFinite(+q[6])){ w.cx = +q[6]; w.cy = num(q[7], w.y); } return w; });
       }
       if(o.path && !o.path.length) delete o.path;
     }
@@ -866,14 +895,87 @@ function loadScenario(data, opts={}){
 let saveTimer = 0;
 // notes pinned to a route pop up when that person reaches the spot; their time and pin follow the route
 function routePts(it){ return [{x:it.x, y:it.y}, ...(it.path||[])]; }
+/* ---------------- route legs: straight or curved ----------------
+   The leg into a waypoint runs from the point before it. If that waypoint has a bend point (cx, cy) the leg is a smooth
+   curve pulled toward it (a quadratic curve); otherwise it's straight. Fractions along a leg are measured along the
+   curve, so "move when he reaches" pins and notes keep their spot. */
+const LEG_N = 32, legCache = new Map();
+const isCurved = B => !!B && B.cx!=null;
+function legTab(A, B){
+  const k = A.x+','+A.y+','+B.cx+','+B.cy+','+B.x+','+B.y; let t = legCache.get(k); if(t) return t;
+  const pts = [], cum = [0];
+  for(let i=0;i<=LEG_N;i++){ const u = i/LEG_N, w = 1-u; pts.push({x:w*w*A.x + 2*u*w*B.cx + u*u*B.x, y:w*w*A.y + 2*u*w*B.cy + u*u*B.y});
+    if(i) cum.push(cum[i-1] + Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y)); }
+  t = {pts, cum, L:cum[LEG_N]}; if(legCache.size > 5000) legCache.clear(); legCache.set(k, t); return t;
+}
+function legLen(A, B){ return isCurved(B) ? legTab(A, B).L : Math.hypot(B.x-A.x, B.y-A.y); }   // grid squares
+// point, heading (degrees) and curve parameter at fraction f of the leg's length
+function legPt(A, B, f){
+  f = clamp(f, 0, 1);
+  if(!isCurved(B)) return {x:A.x+(B.x-A.x)*f, y:A.y+(B.y-A.y)*f, r:deg(Math.atan2(B.y-A.y, B.x-A.x)), u:f};
+  const T = legTab(A, B), d = f*T.L; let i = 1; while(i < LEG_N && T.cum[i] < d) i++;
+  const sl = T.cum[i]-T.cum[i-1], g = sl > 1e-9 ? clamp((d-T.cum[i-1])/sl, 0, 1) : 0, u = (i-1+g)/LEG_N, w = 1-u;
+  const tx = 2*w*(B.cx-A.x) + 2*u*(B.x-B.cx), ty = 2*w*(B.cy-A.y) + 2*u*(B.y-B.cy);
+  return {x:w*w*A.x + 2*u*w*B.cx + u*u*B.x, y:w*w*A.y + 2*u*w*B.cy + u*u*B.y, r:deg(Math.atan2(ty, tx)), u};
+}
+function legPoly(A, B){ return isCurved(B) ? legTab(A, B).pts : [{x:A.x, y:A.y}, {x:B.x, y:B.y}]; }
+// the spot on a leg nearest (x, y): fraction along it and distance
+function legNearest(A, B, x, y){
+  const P = legPoly(A, B), L = legLen(A, B) || 1e-9; let best = {d:1e9, f:0}, acc = 0;
+  for(let i=1;i<P.length;i++){ const a = P[i-1], b = P[i], vx = b.x-a.x, vy = b.y-a.y, l2 = vx*vx+vy*vy, sl = Math.sqrt(l2);
+    const g = l2 ? clamp(((x-a.x)*vx + (y-a.y)*vy)/l2, 0, 1) : 0, d = Math.hypot(a.x+vx*g-x, a.y+vy*g-y);
+    if(d < best.d) best = {d, f:clamp((acc + g*sl)/L, 0, 1)}; acc += sl; }
+  return best;
+}
+// the bend point that makes the leg pass through (px, py) halfway along
+const bendThrough = (A, B, px, py) => ({x:2*px - (A.x+B.x)/2, y:2*py - (A.y+B.y)/2});
+
+/* ---------------- obstructions ----------------
+   A man can't walk through walls, windows or furniture (he goes through doors and openings). If a leg of his route runs
+   into one, he walks up to it and stops there: the rest of his route is shown greyed out until the way is clear again.
+   Nothing is deleted, so moving or removing the wall (or the waypoint) brings the route back. */
+let obstCache = {v:-1, s:null, segs:[]}, obstScene = null;   // obstScene: the scenario a schedule is being worked out for
+function obstacles(){
+  const SS = obstScene || S;
+  if(obstCache.v!==ver || obstCache.s!==SS){ const segs = [];
+    for(const [k,e] of SS.edges){ if(e.t==='w' || e.t==='n'){ const [d,x,y] = parseKey(k); segs.push([...edgePts(d,x,y), null, e.t==='n' ? 'a window' : 'a wall']); } }
+    for(const it of SS.items){ if(!FURN[it.k]) continue; const c = rectCorners(it), nm = 'the ' + FURN[it.k].n.toLowerCase(); for(let i=0;i<4;i++){ const a = c[i], b = c[(i+1)%4]; segs.push([a[0], a[1], b[0], b[1], it, nm]); } }
+    obstCache = {v:ver, s:SS, segs, block:new Map()}; }
+  return obstCache.segs;
+}
+// where segment a→b first crosses segment c→d, as a fraction along a→b (or null)
+function segHit(ax, ay, bx, by, cx, cy, dx, dy){
+  const rx = bx-ax, ry = by-ay, sx = dx-cx, sy = dy-cy, den = rx*sy - ry*sx; if(Math.abs(den) < 1e-12) return null;
+  const t = ((cx-ax)*sy - (cy-ay)*sx)/den, u = ((cx-ax)*ry - (cy-ay)*rx)/den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+}
+// how far along a leg (fraction) he gets before he'd walk into something, and where it is; null if the way is clear
+function legBlock(A, B){
+  const segs = obstacles(), key = A.x+','+A.y+','+B.x+','+B.y+','+B.cx+','+B.cy, memo = obstCache.block;
+  if(memo.has(key)) return memo.get(key);
+  const P = legPoly(A, B), L = legLen(A, B); let out = null;
+  if(L > 1e-6){
+    // furniture he's standing in (or on the edge of) doesn't stop him stepping off it
+    const skip = new Set(); for(const q of segs) if(q[4] && inRect(q[4], A.x, A.y, 0.02)) skip.add(q[4]);
+    let acc = 0;
+    for(let i=1;i<P.length && !out;i++){ const a = P[i-1], b = P[i], sl = Math.hypot(b.x-a.x, b.y-a.y); let tmin = null, what = '';
+      for(const q of segs){ if(q[4] && skip.has(q[4])) continue;
+        const t = segHit(a.x, a.y, b.x, b.y, q[0], q[1], q[2], q[3]); if(t!=null && (acc + t*sl) > 0.02 && (tmin==null || t < tmin)){ tmin = t; what = q[5]; } }
+      if(tmin!=null){ const d = acc + tmin*sl; out = {f:Math.max(0, d - 0.75/FT)/L, x:a.x + (b.x-a.x)*tmin, y:a.y + (b.y-a.y)*tmin, what}; }
+      acc += sl; }
+  }
+  memo.set(key, out); return out;
+}
+// the time he reaches fraction f of a leg (pins and notes), or null if he's stopped short of it
+function legTimeF(q, f){ const fe = q.fe==null ? 1 : q.fe; if(f > fe + 1e-6) return null; return legTime(q, fe > 1e-9 ? f/fe : 0); }
 function syncAnchoredSteps(){
   let any = false;
   for(const st of S.steps){ if(!st.who) continue; any = true;
     const it = getItem(st.who), pts = it && routePts(it);
     if(!it || !pts[st.seg+1]){ delete st.who; delete st.seg; delete st.f; st.lost = 1; continue; }
-    const a = pts[st.seg], b = pts[st.seg+1]; st.x = a.x + (b.x-a.x)*st.f; st.y = a.y + (b.y-a.y)*st.f;
+    const a = pts[st.seg], b = pts[st.seg+1], lp = legPt(a, b, st.f); st.x = lp.x; st.y = lp.y;
     const sc = sched().map.get(it.id), ph = sc && sc.ph.find(q => q.k==='m' && q.leg===st.seg);
-    const t = ph ? legTime(ph, st.f) : sc && sc.arr[st.seg]!=null ? sc.arr[st.seg] : null;
+    const t = ph ? legTimeF(ph, st.f) : sc && sc.arr[st.seg]!=null ? sc.arr[st.seg] : null;
     st.never = t==null; st.t = t==null ? 1e6 : t; }
   if(any) S.steps.sort((a,b) => a.t-b.t);
 }
@@ -887,11 +989,14 @@ function routeAnchors(it){
 // adds a waypoint on leg `seg` at fraction f; the waypoints after it keep their order, so the route stays chronological
 function insertWaypoint(it, seg, f){
   const pts = routePts(it), A = pts[seg], B = pts[seg+1]; if(!B) return -1;
-  const x = snap(A.x + (B.x-A.x)*f, 1/6), y = snap(A.y + (B.y-A.y)*f, 1/6), next = it.path[seg];
-  const L = Math.hypot(B.x-A.x, B.y-A.y), t = L ? clamp(Math.hypot(x-A.x, y-A.y)/L, 0.001, 0.999) : 0.5;
+  const lp = legPt(A, B, f), next = it.path[seg], curved = isCurved(B);
+  const x = curved ? r2(lp.x) : snap(lp.x, 1/6), y = curved ? r2(lp.y) : snap(lp.y, 1/6), t = clamp(f, 0.001, 0.999);
+  // a curved leg splits into two curves that follow the same line
+  let c1 = null; if(curved){ const u = lp.u; c1 = {x:r2(A.x + (B.cx-A.x)*u), y:r2(A.y + (B.cy-A.y)*u)}; next.cx = r2(B.cx + (B.x-B.cx)*u); next.cy = r2(B.cy + (B.y-B.cy)*u); }
   for(const a of routeAnchors(it)){ if(a.seg > seg) a.seg++;
     else if(a.seg===seg){ const af = a.f||0; if(af <= t) a.f = r2(af/t); else { a.seg = seg+1; a.f = r2((af-t)/(1-t)); } } }
-  it.path.splice(seg, 0, {x, y, sp:next.sp, w:0, go:'', g:null});
+  const nw = {x, y, sp:next.sp, w:0, go:'', g:null}; if(c1){ nw.cx = c1.x; nw.cy = c1.y; }
+  it.path.splice(seg, 0, nw);
   return seg;
 }
 function deleteWaypoint(it, i){
@@ -903,15 +1008,17 @@ function deleteWaypoint(it, i){
       const P = pts[a.seg], Q = pts[a.seg+1], wx = P.x + (Q.x-P.x)*(a.f||0), wy = P.y + (Q.y-P.y)*(a.f||0);
       const A = pts[i], B = pts[i+2], vx = B.x-A.x, vy = B.y-A.y, L = vx*vx + vy*vy;
       a.seg = i; a.f = r2(L ? clamp(((wx-A.x)*vx + (wy-A.y)*vy)/L, 0, 1) : 0); } }
-  it.path.splice(i, 1); if(!it.path.length) delete it.path;
+  it.path.splice(i, 1);
+  // the leg that now joins the points either side of it starts straight
+  if(it.path[i]){ delete it.path[i].cx; delete it.path[i].cy; }
+  if(!it.path.length) delete it.path;
 }
 function nearestRoute(x, y, tol, only){
   let best = null;
   for(const it of S.items){ if(!isPerson(it) || !it.path || !it.path.length || (only && it!==only)) continue;
     const pts = routePts(it);
-    for(let i=0;i<pts.length-1;i++){ const a = pts[i], b = pts[i+1], vx = b.x-a.x, vy = b.y-a.y, L = vx*vx+vy*vy;
-      const f = L ? clamp(((x-a.x)*vx + (y-a.y)*vy)/L, 0, 1) : 0, d = Math.hypot(a.x+vx*f-x, a.y+vy*f-y);
-      if(d < tol && (!best || d < best.d)) best = {it, seg:i, f, d}; } }
+    for(let i=0;i<pts.length-1;i++){ const n = legNearest(pts[i], pts[i+1], x, y);
+      if(n.d < tol && (!best || n.d < best.d)) best = {it, seg:i, f:n.f, d:n.d}; } }
   return best;
 }
 function changed(){
@@ -941,7 +1048,7 @@ const CORNER_R = 0.32;  // corners he walks through without stopping are rounded
 const SWEEP = {half:22.5, per:1.0};   // sweep: ±22.5° (a 45° cone), one back-and-forth per second   // degrees per second
 const turnTime = (a, b) => Math.abs(angDiff(a, b)) / TURN_RATE;
 function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bangs, bangsPrev){
-  const ph = [], arr = [], sigs = [], fired = []; let t = 0, x = it.x, y = it.y, r = it.r||0, g = it.g||0, look = null, stuck = null; const used = new Set();
+  const ph = [], arr = [], sigs = [], fired = []; let t = 0, x = it.x, y = it.y, r = it.r||0, g = it.g||0, look = null, stuck = null, blocked = null; const used = new Set();
   const hold = d => { if(!(d > 1e-6)) return; ph.push({k:'h', t0:t, t1:t+d, x, y, r0:r, look, g}); t += d; if(look) r = angTo(x,y,look); };
   const run = acts => {
     for(const a of (acts||[])){
@@ -968,7 +1075,7 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
         const m = prev && prev.get(a.who), who = S.items.find(i => i.id===a.who), nm = who ? tagOf(who) : 'his teammate';
         if(!a.set){ stuck = `you to pick the spot on ${nm}’s route`; return false; }
         if(!m){ stuck = `${nm} to reach his spot`; return false; }
-        const mv = m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? legTime(mv, a.f) : m.arr[a.seg];
+        const mv = m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? legTimeF(mv, a.f) : m.arr[a.seg];
         if(tt==null){ stuck = `${nm} to reach his spot, but he never gets there`; return false; }
         hold(tt + (a.d||0) - t); }
       else if(a.k==='mwith'){   // moves off when the man he's stacked on moves off (plus a short lag)
@@ -994,9 +1101,13 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
   let ok = run(it.acts);
   if(ok) (it.path||[]).forEach((w,i) => {
     if(!ok) return;
-    const ll = w.lx!=null ? {x:w.lx, y:w.ly} : null, dist = Math.hypot(w.x-x, w.y-y)*FT;
-    if(dist > 0.05){ const d = dist/(w.sp||5), tr = deg(Math.atan2(w.y-y, w.x-x));
-      ph.push({k:'m', t0:t, t1:t+d, ax:x, ay:y, bx:w.x, by:w.y, tr, rIn:r, look:ll, g, leg:i}); t += d; x = w.x; y = w.y; r = ll ? angTo(x,y,ll) : tr; look = ll; }
+    const ll = w.lx!=null ? {x:w.lx, y:w.ly} : null, A = {x, y}, B = {x:w.x, y:w.y, cx:w.cx, cy:w.cy}, dist = legLen(A, B)*FT;
+    if(dist > 0.05){
+      // something in the way: he walks up to it and stops there
+      const blk = legBlock(A, B), fe = blk ? blk.f : 1, d = dist*fe/(w.sp||5);
+      if(dist*fe > 0.05){ const p1 = legPt(A, B, fe);
+        ph.push({k:'m', t0:t, t1:t+d, ax:x, ay:y, bx:w.x, by:w.y, A, B, fe, tr:legPt(A, B, 0).r, rIn:r, look:ll, g, leg:i}); t += d; x = p1.x; y = p1.y; r = ll ? angTo(x,y,ll) : p1.r; look = ll; }
+      if(blk){ blocked = {leg:i, x, y, hx:blk.x, hy:blk.y, what:blk.what}; ok = false; return; } }
     arr[i] = t;
     ok = run(w.acts);
   });
@@ -1004,11 +1115,11 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
   // movement shape: he speeds up out of a stop and slows into one; legs he walks straight through carry on at speed
   let dacc = 0;
   for(let i=0;i<ph.length;i++){ const q = ph[i], pr = ph[i-1], nx = ph[i+1]; q.d0 = dacc; if(q.k!=='m') continue;
-    q.len = Math.hypot(q.bx-q.ax, q.by-q.ay)*FT; dacc += q.len;
+    q.len = legLen(q.A, q.B)*q.fe*FT; dacc += q.len;
     q.cin = !!(pr && pr.k==='m' && Math.abs(pr.t1 - q.t0) < 1e-6); q.cout = !!(nx && nx.k==='m' && Math.abs(nx.t0 - q.t1) < 1e-6);
     const T = Math.max(1e-6, q.t1 - q.t0); q.ta = q.cin ? 0 : Math.min(ACC_T, T*0.45); q.tb = q.cout ? 0 : Math.min(ACC_T, T*0.45);
     q.vmax = 1/(T - q.ta/2 - q.tb/2); }
-  return {ph, arr, sigs, fired, end:t, stuck};
+  return {ph, arr, sigs, fired, end:t, stuck, blocked};
 }
 // how far along a leg he is at time t (0–1) and his speed then (fraction of the leg per second)
 function legFrac(q, t){
@@ -1025,6 +1136,10 @@ function legTime(q, f){
   return q.t0 + ta + (f - sa)/vm;
 }
 function buildSched(s){
+  const keep = obstScene; obstScene = s;
+  try{ return buildSched0(s); } finally { obstScene = keep; }
+}
+function buildSched0(s){
   const people = s.items.filter(isPerson); let rel = {}, gates = {}, map = new Map(), doorEv = [], recv = {}, doorT = {}, prev = null, prevMoves = {}, bangs = [], bangsPrev = [];
   for(let iter=0; iter<30; iter++){
     const arrive = {}, opens = {}; map = new Map(); doorEv = []; bangs = [];
@@ -1062,7 +1177,26 @@ function poseAt(it, t){
   const tr = facingTrack(it), f = clamp(t/tr.DT, 0, tr.n-1), i = Math.floor(f), j = Math.min(tr.n-1, i+1);
   p.r = (tr.a[i] + angDiff(tr.a[i], tr.a[j])*(f-i) + 360) % 360; return p;
 }
+/* ---- bodies stay out of walls ----
+   However a route is drawn (a waypoint tucked against a door frame, a corner cut short, a stack spot on the wall),
+   a man's body is kept clear of walls and windows: if his centre comes within BODY_R of a wall he's eased back out,
+   so he brushes past a door frame instead of walking through it. Doors aren't included (they swing and get opened). */
+const BODY_R = 0.75/FT;   // half a wall plus his shoulders, in grid squares
+let wallCache = {v:-1, segs:[]};
+function wallSegs(){ if(wallCache.v!==ver){ const segs = []; for(const [k,e] of S.edges){ if(e.t==='w' || e.t==='n'){ const [d,x,y] = parseKey(k); segs.push(edgePts(d,x,y)); } } wallCache = {v:ver, segs}; } return wallCache.segs; }
+function offWalls(x, y){
+  const segs = wallSegs();
+  for(let pass = 0; pass < 3; pass++){ let moved = false;
+    for(const q of segs){ if(x < Math.min(q[0], q[2]) - 0.5 || x > Math.max(q[0], q[2]) + 0.5 || y < Math.min(q[1], q[3]) - 0.5 || y > Math.max(q[1], q[3]) + 0.5) continue;
+      const dx = q[2]-q[0], dy = q[3]-q[1], u = clamp(((x-q[0])*dx + (y-q[1])*dy)/(dx*dx + dy*dy), 0, 1), nx = q[0] + u*dx, ny = q[1] + u*dy, d = Math.hypot(x - nx, y - ny);
+      if(d < BODY_R - 1e-4 && d > 1e-6){ const k = (BODY_R - d)/d; x += (x - nx)*k; y += (y - ny)*k; moved = true; } }
+    if(!moved) break; }
+  return [x, y];
+}
 function rawPoseAt(it, t){
+  const p = rawPoseAt0(it, t); const [x, y] = offWalls(p.x, p.y); p.x = x; p.y = y; return p;
+}
+function rawPoseAt0(it, t){
   const sc = sched().map.get(it.id);
   if(!sc) return {x:it.x, y:it.y, r:it.r||0, g:it.g||0};
   const ph = sc.ph; let pi = ph.length-1;
@@ -1070,8 +1204,8 @@ function rawPoseAt(it, t){
   const p = ph[pi];
   let sig = null; for(const s of sc.sigs) if(t >= s.t0 && t < s.t1) sig = s;
   if(p.k==='m'){
-    const {s, v} = legFrac(p, t), L = p.len/FT;
-    let x = p.ax+(p.bx-p.ax)*s, y = p.ay+(p.by-p.ay)*s, dir = p.tr;
+    const {s, v} = legFrac(p, t), L = p.len/FT, P = legPt(p.A, p.B, s*p.fe);
+    let x = P.x, y = P.y, dir = P.r;
     // corners he walks straight through are rounded off: a short curve from just before the waypoint to just after it
     const curve = (A, P1, Bq, c, cA, cB, u) => {
       const ua = Math.hypot(P1.x-A.x, P1.y-A.y)||1, ub = Math.hypot(Bq.x-P1.x, Bq.y-P1.y)||1;
@@ -1079,8 +1213,11 @@ function rawPoseAt(it, t){
       return {x:w*w*Q0.x + 2*u*w*P1.x + u*u*Q1.x, y:w*w*Q0.y + 2*u*w*P1.y + u*u*Q1.y,
         r:deg(Math.atan2(2*w*(P1.y-Q0.y) + 2*u*(Q1.y-P1.y), 2*w*(P1.x-Q0.x) + 2*u*(Q1.x-P1.x)))}; };
     const nx = ph[pi+1], pr = ph[pi-1], d = s*L;
-    if(p.cout && nx){ const c = Math.min(CORNER_R, 0.4*L, 0.4*nx.len/FT); if(c > 0.02 && d > L - c){ const k = curve({x:p.ax,y:p.ay}, {x:p.bx,y:p.by}, {x:nx.bx,y:nx.by}, c, 0, 0, (d - (L - c))/(2*c)); x = k.x; y = k.y; dir = k.r; } }
-    if(p.cin && pr){ const c = Math.min(CORNER_R, 0.4*L, 0.4*pr.len/FT); if(c > 0.02 && d < c){ const k = curve({x:pr.ax,y:pr.ay}, {x:p.ax,y:p.ay}, {x:p.bx,y:p.by}, c, 0, 0, 0.5 + d/(2*c)); x = k.x; y = k.y; dir = k.r; } }
+    // (on curved legs the corner is shaped from the directions the legs leave and arrive at the waypoint)
+    const back = (q, at) => { const h = rad(legPt(q.A, q.B, 1).r); return {x:at.x - Math.cos(h), y:at.y - Math.sin(h)}; };
+    const ahead = (q, at) => { const h = rad(legPt(q.A, q.B, 0).r); return {x:at.x + Math.cos(h), y:at.y + Math.sin(h)}; };
+    if(p.cout && nx && nx.A){ const c = Math.min(CORNER_R, 0.4*L, 0.4*nx.len/FT); if(c > 0.02 && d > L - c){ const at = {x:p.bx, y:p.by}, k = curve(back(p, at), at, ahead(nx, at), c, 0, 0, (d - (L - c))/(2*c)); x = k.x; y = k.y; dir = k.r; } }
+    if(p.cin && pr && pr.A){ const c = Math.min(CORNER_R, 0.4*L, 0.4*pr.len/FT); if(c > 0.02 && d < c){ const at = {x:p.ax, y:p.ay}, k = curve(back(pr, at), at, ahead(p, at), c, 0, 0, 0.5 + d/(2*c)); x = k.x; y = k.y; dir = k.r; } }
     return {x, y, r:p.look ? angTo(x,y,p.look) : (dir+360)%360, g:p.g, sig, moving:true, dist:p.d0 + s*p.len, v:v*p.len, vn:p.len/Math.max(1e-6, p.t1-p.t0)}; }
   let r = p.look ? angTo(p.x,p.y,p.look) : p.r0;
   if(p.sweep) r = (r + SWEEP.half*Math.sin(2*Math.PI*(t - p.sweep.t0)/SWEEP.per) + 360) % 360;
@@ -1470,7 +1607,7 @@ function drawPlan(){
   const focus = pickWho || sp, showRoutes = routesOn || tool==='path' || !!pickWho;
   const drawLooks = (it, acts, p, col, owner) => { (acts||[]).forEach(a => {
       if(a.k==='wloc' && a.set){ const w = getItem(a.who), pts = w && routePts(w); if(!pts || !pts[a.seg+1]) return;
-        const A = pts[a.seg], Bp = pts[a.seg+1], q = toScreen(A.x+(Bp.x-A.x)*a.f, A.y+(Bp.y-A.y)*a.f);
+        const lp = legPt(pts[a.seg], pts[a.seg+1], a.f), q = toScreen(lp.x, lp.y);
         ctx.strokeStyle = C.accent; ctx.lineWidth = 1.4; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = C.sheet; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(q.x,q.y,8,0,7); ctx.fill(); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(q.x-12,q.y); ctx.lineTo(q.x+12,q.y); ctx.moveTo(q.x,q.y-12); ctx.lineTo(q.x,q.y+12); ctx.stroke();
@@ -1490,31 +1627,51 @@ function drawPlan(){
   if(showRoutes) for(const it of S.items){ if(!isPerson(it)) continue;
     const hasPath = it.path && it.path.length, isSel = sp===it;
     if(!hasPath && !(isSel && it.acts && it.acts.length)) continue;
-    const col = pColor(it,C), pts = [{x:it.x,y:it.y}, ...(it.path||[])].map(p => toScreen(p.x,p.y));
+    const raw = routePts(it), col = pColor(it,C), pts = raw.map(p => toScreen(p.x,p.y)), scI = SC2.map.get(it.id), blk = scI && scI.blocked;
+    // the route as drawn: curves followed, and split where something stops him (the rest is greyed out)
+    const live = [], dead = [];
+    for(let i=1;i<raw.length;i++){ const A = raw[i-1], B = raw[i], P = legPoly(A, B).map(q => toScreen(q.x, q.y));
+      if(!blk || i-1 < blk.leg){ live.push(P); continue; }
+      if(i-1 > blk.leg){ dead.push(P); continue; }
+      const cut = toScreen(blk.x, blk.y), fe = legNearest(A, B, blk.x, blk.y).f, n = Math.max(1, Math.round(fe*(P.length-1)));
+      live.push([...P.slice(0, n), cut]); dead.push([cut, ...P.slice(n)]); }
+    const strokeLegs = L => { ctx.beginPath(); for(const P of L){ P.forEach((q,k) => k ? ctx.lineTo(q.x,q.y) : ctx.moveTo(q.x,q.y)); } ctx.stroke(); };
     const isPick = pickWho===it, ghost = focus && focus!==it && !(pickWho && isSel);
     if(hasPath){
       if(isPick){ ctx.save(); ctx.strokeStyle = C.accent; ctx.globalAlpha = 0.28; ctx.lineWidth = 12; ctx.lineJoin = ctx.lineCap = 'round';
-        ctx.beginPath(); pts.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.stroke(); ctx.restore();
+        strokeLegs(live); ctx.restore();
         pill(pts[0].x, pts[0].y - R0 - 22, 'TAP ' + tagOf(it) + '’S ROUTE', C.accent, tok('--accent-ink')); }
       ctx.strokeStyle = isPick ? C.accent : col; ctx.globalAlpha = isPick ? 1 : isSel ? (pickWho ? 0.35 : 0.9) : ghost ? 0.12 : 0.4; ctx.lineWidth = isPick ? 3 : isSel ? 2.4 : 1.6; ctx.lineJoin='round';
-      ctx.beginPath(); pts.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.stroke();
-      for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i], L = Math.hypot(b.x-a.x,b.y-a.y); if(L<26) continue;
-        const mx=(a.x+b.x)/2, my=(a.y+b.y)/2, an = Math.atan2(b.y-a.y,b.x-a.x), q = 5;
+      strokeLegs(live);
+      const bendable = isSel && !pickWho && !READONLY && (tool==='select' || tool==='path');
+      for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i], L = Math.hypot(b.x-a.x,b.y-a.y); if(L<26 || (blk && i-1 > blk.leg)) continue;
+        const lp = legPt(raw[i-1], raw[i], 0.5), m = toScreen(lp.x, lp.y), an = rad(lp.r), q = 5, mx = m.x, my = m.y;
+        if(bendable && L >= 40) continue;   // the bend handle sits here instead
         ctx.beginPath(); ctx.moveTo(mx-Math.cos(an-0.6)*q, my-Math.sin(an-0.6)*q); ctx.lineTo(mx,my); ctx.lineTo(mx-Math.cos(an+0.6)*q, my-Math.sin(an+0.6)*q); ctx.stroke(); }
+      if(dead.length){ const ga = ctx.globalAlpha; ctx.strokeStyle = C.hostile; ctx.globalAlpha = Math.min(ga, 0.5); ctx.setLineDash([3,5]); ctx.lineWidth = 1.6; strokeLegs(dead); ctx.setLineDash([]); ctx.globalAlpha = ga; }
+      if(blk){ const h = toScreen(blk.hx, blk.hy), k = 6; ctx.globalAlpha = ghost ? 0.3 : 1; ctx.strokeStyle = C.hostile; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(h.x-k,h.y-k); ctx.lineTo(h.x+k,h.y+k); ctx.moveTo(h.x+k,h.y-k); ctx.lineTo(h.x-k,h.y+k); ctx.stroke();
+        if(isSel) pill(h.x, h.y - 16, 'BLOCKED · HE STOPS HERE', C.hostile, '#ffffff'); }
+      // bend handles: drag the diamond in the middle of a leg to curve it
+      if(bendable) for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i]; if(Math.hypot(b.x-a.x,b.y-a.y) < 40) continue;
+        const lp = legPt(raw[i-1], raw[i], 0.5), m = toScreen(lp.x, lp.y), on = isCurved(raw[i]), k = on ? 6 : 5;
+        ctx.globalAlpha = 1; ctx.fillStyle = on ? col : C.sheet; ctx.strokeStyle = col; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(m.x, m.y-k); ctx.lineTo(m.x+k, m.y); ctx.lineTo(m.x, m.y+k); ctx.lineTo(m.x-k, m.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+        hits.push({kind:'bend', it, i:i-1, x:m.x, y:m.y, rx:11, ry:11}); }
       ctx.globalAlpha = 1;
     }
     const ps0 = pts[0];
     if(TIME > 0.001 && hasPath){ ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.arc(ps0.x,ps0.y,R0*0.8,0,7); ctx.stroke(); ctx.setLineDash([]);
       if(isSel) hits.push({kind:'start', it, x:ps0.x, y:ps0.y, rx:R0, ry:R0}); }
     if(isSel && !pickWho){ drawLooks(it, it.acts, ps0, col, -1); drawActBadges(ctx, ps0, it.acts, col, C, R0); }
-    const arrT = SC2.map.get(it.id);
+    const arrT = SC2.map.get(it.id), stayW = isSel ? stayWindows(it) : null;
     (it.path||[]).forEach((w,i) => {
       const p = pts[i+1], wsel = sel && sel.type==='wp' && sel.id===it.id && sel.i===i;
       if(isSel && !pickWho && w.lx!=null){ const lq = toScreen(w.lx,w.ly);
         ctx.strokeStyle = col; ctx.globalAlpha = wsel?0.85:0.45; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(lq.x,lq.y); ctx.stroke(); ctx.setLineDash([]);
         drawEye(ctx, lq.x, lq.y, col, C, wsel, true); ctx.globalAlpha = 1;
         hits.push({kind:'look', it, i, x:lq.x, y:lq.y, rx:15, ry:15}); }
-      else if(wsel){ const a = Math.atan2(p.y-pts[i].y, p.x-pts[i].x) || 0, hx = p.x + Math.cos(a)*30, hy = p.y + Math.sin(a)*30;
+      else if(wsel){ const a = rad(legPt(raw[i], raw[i+1], 1).r) || 0, hx = p.x + Math.cos(a)*30, hy = p.y + Math.sin(a)*30;
         ctx.globalAlpha = 0.75; drawEye(ctx, hx, hy, col, C, false, false); ctx.globalAlpha = 1;
         ctx.font = '600 10px "Barlow Condensed", sans-serif'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left'; ctx.fillText('DRAG TO SET FACING', hx + 12, hy + 3); ctx.textAlign = 'center';
         hits.push({kind:'lookNew', it, i, x:hx, y:hy, rx:15, ry:15}); }
@@ -1523,10 +1680,20 @@ function drawPlan(){
       ctx.fillStyle = wsel ? C.accent : isPick ? C.accent : col; ctx.globalAlpha = isSel||isPick ? 1 : ghost ? 0.15 : 0.5; ctx.beginPath(); ctx.arc(p.x,p.y,isPick?4:r,0,7); ctx.fill();
       if(isSel){ ctx.strokeStyle = C.sheet; ctx.lineWidth = 1.5; ctx.stroke(); } ctx.globalAlpha = 1;
       if(isSel && !pickWho){ drawActBadges(ctx, p, w.acts, col, C, r);
-        if(arrT && arrT.arr[i]!=null){ ctx.font = '500 10px "JetBrains Mono", monospace'; ctx.textAlign='left'; ctx.fillStyle = C.ink2; ctx.fillText(arrT.arr[i].toFixed(1)+'s', p.x+8, p.y-8); ctx.textAlign='center'; }
+        if(arrT && arrT.arr[i]!=null){ ctx.font = '500 10px "JetBrains Mono", monospace'; ctx.textAlign='left'; ctx.fillStyle = C.ink2;
+          const sw = stayW && stayW.find(v => v.i===i), lab = sw && sw.t1 - sw.t0 > 0.05 ? arrT.arr[i].toFixed(1) + '–' + (sw.t1===Infinity ? 'end' : sw.t1.toFixed(1)) + 's' : arrT.arr[i].toFixed(1) + 's';
+          ctx.fillText(lab, p.x+8, p.y-8); ctx.textAlign='center'; }
         hits.push({kind:'wp', it, i, x:p.x, y:p.y, rx:13, ry:13}); }
     });
   }
+
+  // while you drag a man or one of his stops: who else stands near there, and when (red = at the same time as him)
+  if(dragNear){ const D = dragNear;
+    for(const sp of standSpots(D.it)){ if(Math.hypot(sp.x - D.x, sp.y - D.y) > 1.6) continue;
+      const q = toScreen(sp.x, sp.y), both = D.win && sp.t0 < D.win.t1 - SPOT_SLACK && D.win.t0 < sp.t1 - SPOT_SLACK;
+      ctx.strokeStyle = both ? C.hostile : C.ink2; ctx.lineWidth = 1.4; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.arc(q.x, q.y, SPACE*sc, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+      pill(q.x, q.y + R0 + 14, `${tagOf(sp.q)} ${sp.t0.toFixed(1)}–${sp.t1===Infinity ? 'end' : sp.t1.toFixed(1)}s`, both ? C.hostile : C.ink2, '#ffffff'); }
+    if(D.win){ const q = toScreen(D.x, D.y); pill(q.x, q.y - R0 - 16, `${tagOf(D.it)} ${D.win.t0.toFixed(1)}–${D.win.t1===Infinity ? 'end' : D.win.t1.toFixed(1)}s`, C.accent, tok('--accent-ink')); } }
 
   // people
   for(const it of S.items){ if(!isPerson(it)) continue;
@@ -1724,17 +1891,30 @@ function routeInsertOp(h, sx, sy){
   return {move(x,y){ if(Math.hypot(x-sx,y-sy)<4) return; const q = toWorld(x,y); w.x = snap(q.x,1/6); w.y = snap(q.y,1/6); changed(); }, up(){ renderInspector(); }};
 }
 /* ---- personal space: people can't be put on top of each other ----
-   Where a person stands still (his start, the end of his route, or a waypoint where he does something) is kept at least
-   SPACE from where anyone else stands still. Dropping or dragging him closer pushes him back out, the way he'd step off a
-   teammate, and never through a wall. */
-const SPACE = 1.35/FT;
-let repelHit = null;   // who he was pushed off, for the hint after the drag
-function standSpots(except){
-  const out = [];
-  for(const q of S.items){ if(!isPerson(q) || q===except) continue; out.push({x:q.x, y:q.y, q});
-    (q.path || []).forEach((w, i, a) => { if(i===a.length - 1 || (w.acts && w.acts.length)) out.push({x:w.x, y:w.y, q}); }); }
+   Where a person stands still (his start, the end of his route, or a waypoint where he stops) is kept at least SPACE from
+   where anyone else is standing AT THE SAME TIME. Two men can use the same spot one after the other (#2 steps into the
+   spot #1 just left); only if they'd be there together is the one you're placing pushed back out, never through a wall. */
+const SPACE = 1.35/FT, SPOT_SLACK = 0.25;   // seconds of overlap allowed when one steps in as the other steps off
+let dragNear = null;  // while dragging a man or his stop: show when the people standing nearby are there
+let repelHit = null;   // who he was pushed off and when they'd both be there, for the hint after the drag
+// where a man stands still and when: his start (i = -1) and each waypoint where he stops
+function stayWindows(q){
+  const m = sched().map.get(q.id); if(!m) return [{x:q.x, y:q.y, t0:0, t1:Infinity, i:-1}];
+  const moves = m.ph.filter(p => p.k==='m'), leaveAfter = leg => { const nx = moves.find(p => p.leg > leg); return nx ? nx.t0 : Infinity; };
+  const out = [{x:q.x, y:q.y, t0:0, t1:leaveAfter(-1), i:-1}];
+  (q.path || []).forEach((w, i, a) => { if(m.arr[i]==null) return; const t0 = m.arr[i], t1 = leaveAfter(i);
+    if(i===a.length - 1 || t1 - t0 > 0.05 || (w.acts && w.acts.length)) out.push({x:w.x, y:w.y, t0, t1, i}); });
+  if(m.blocked) out.push({x:m.blocked.x, y:m.blocked.y, t0:m.end, t1:Infinity, i:-2});   // stopped short at an obstruction
   return out;
 }
+function standSpots(except){
+  const out = [];
+  for(const q of S.items){ if(!isPerson(q) || q===except) continue; for(const w of stayWindows(q)) out.push({...w, q}); }
+  return out;
+}
+// when the man being placed would stand at spot i (-1 = his start); null if he never gets there
+function myWindow(it, i){ const w = stayWindows(it).find(v => v.i===i); return w ? {t0:w.t0, t1:w.t1} : null; }
+const fmtT = t => t===Infinity ? 'the end' : t.toFixed(1) + ' s';
 const isStandWp = (it, i) => !!(it.path && (i===it.path.length - 1 || (it.path[i].acts && it.path[i].acts.length)));
 function segsCross(ax,ay,bx,by,cx,cy,dx,dy){
   const d1 = (bx-ax)*(cy-ay) - (by-ay)*(cx-ax), d2 = (bx-ax)*(dy-ay) - (by-ay)*(dx-ax), d3 = (dx-cx)*(ay-cy) - (dy-cy)*(ax-cx), d4 = (dx-cx)*(by-cy) - (dy-cy)*(bx-cx);
@@ -1746,11 +1926,12 @@ function wallClear(ax, ay, bx, by){
   return true;
 }
 // the nearest spot to (x,y) that keeps SPACE from everyone else standing still
-function repel(it, x, y){
-  const spots = standSpots(it); repelHit = null;
+function repel(it, x, y, win){
+  const W = win === undefined ? {t0:0, t1:Infinity} : win; repelHit = null; if(!W) return {x, y};
+  const spots = standSpots(it).filter(s => s.t0 < W.t1 - SPOT_SLACK && W.t0 < s.t1 - SPOT_SLACK);
   const clash = (px, py) => spots.find(s => Math.hypot(px - s.x, py - s.y) < SPACE - 1e-3);
   let c = clash(x, y); if(!c) return {x, y};
-  repelHit = c.q;
+  repelHit = {q:c.q, s:c, me:W};
   // try pushing straight off him first, then round in steps, a little further each ring, keeping clear of walls
   const base = Math.atan2(y - c.y, x - c.x) || 0;
   for(let ring = 0; ring < 6; ring++){
@@ -1764,20 +1945,33 @@ function repel(it, x, y){
   }
   return {x, y};
 }
-function repelNote(){ if(repelHit) toast(`Kept about 1⅓ ft from ${tagOf(repelHit)} so nobody stands on anybody`); repelHit = null; }
+function repelNote(){ if(!repelHit) return; const {q, s, me} = repelHit;
+  if(s.t0 < 0.05 && me.t0 < 0.05 && s.t1===Infinity) toast(`Kept about 1⅓ ft from ${tagOf(q)} so nobody stands on anybody`);
+  else toast(`Kept about 1⅓ ft from ${tagOf(q)}: he’s there ${s.t0.toFixed(1)} s to ${fmtT(s.t1)}, and this man would be there from ${me.t0.toFixed(1)} s. To share the spot, have him get there after ${tagOf(q)} steps off (Wait, or Move when he reaches…)`);
+  repelHit = null; }
 
 // drag handlers shared by Move and Path tools
 function dragOps(h, sx, sy){
   const lazy = fn => { let started = false; return (x,y) => { if(!started){ if(Math.hypot(x-sx,y-sy)<4) return; checkpoint(); started = true; } fn(toWorld(x,y)); changed(); }; };
   if(h.kind==='wp'){ const w = h.it.path[h.i]; select({type:'wp', id:h.it.id, i:h.i});
-    return {move:lazy(p => { let nx = snap(p.x,1/6), ny = snap(p.y,1/6); if(isStandWp(h.it, h.i)){ const r = repel(h.it, nx, ny); nx = r.x; ny = r.y; } w.x = nx; w.y = ny; }), up(){ repelNote(); renderInspector(); }}; }
+    return {move:lazy(p => { let nx = snap(p.x,1/6), ny = snap(p.y,1/6); const win = myWindow(h.it, h.i); if(win){ const r = repel(h.it, nx, ny, win); nx = r.x; ny = r.y; } dragNear = {it:h.it, x:nx, y:ny, win};
+      // curves into and out of this waypoint keep their shape as it moves
+      const dx = nx - w.x, dy = ny - w.y, nxt = h.it.path[h.i+1];
+      if(isCurved(w)){ w.cx = r2(w.cx + dx/2); w.cy = r2(w.cy + dy/2); } if(isCurved(nxt)){ nxt.cx = r2(nxt.cx + dx/2); nxt.cy = r2(nxt.cy + dy/2); }
+      w.x = nx; w.y = ny; }), up(){ dragNear = null; drawPlan(); repelNote(); renderInspector(); routeCheckNote(h.it); }}; }
+  if(h.kind==='bend'){ const it = h.it, w = it.path[h.i]; select({type:'wp', id:it.id, i:h.i}); let moved = false;
+    return {move:lazy(p => { const A = routePts(it)[h.i], mid = {x:(A.x+w.x)/2, y:(A.y+w.y)/2}; moved = true;
+        // dropped back on the straight line: the leg goes straight again
+        if(Math.hypot(p.x - mid.x, p.y - mid.y) < 0.18){ delete w.cx; delete w.cy; return; }
+        const c = bendThrough(A, w, p.x, p.y); w.cx = r2(c.x); w.cy = r2(c.y); }),
+      up(){ renderInspector(); if(moved) routeCheckNote(it); }}; }
   if(h.kind==='look' || h.kind==='lookNew'){ const w = h.it.path[h.i]; if(!(sel && sel.type==='wp' && sel.id===h.it.id && sel.i===h.i)) select({type:'wp', id:h.it.id, i:h.i});
     return {move:lazy(p => { w.lx = snap(p.x,1/6); w.ly = snap(p.y,1/6); }), up(){ renderInspector(); }}; }
   if(h.kind==='wloc'){ const a = h.act, who = getItem(a.who); select(h.owner<0 ? {type:'item', id:h.it.id} : {type:'wp', id:h.it.id, i:h.owner});
     return {move:lazy(p => { const nr = who && nearestRoute(p.x, p.y, 99, who); if(nr){ a.seg = nr.seg; a.f = r2(nr.f); } }), up(){ renderInspector(); }}; }
   if(h.kind==='alook'){ const a = h.act; select(h.owner<0 ? {type:'item', id:h.it.id} : {type:'wp', id:h.it.id, i:h.owner});
     return {move:lazy(p => { a.x = snap(p.x,1/6); a.y = snap(p.y,1/6); }), up(){ renderInspector(); }}; }
-  if(h.kind==='start'){ const it = h.it; select({type:'item', id:it.id}); return {move:lazy(p => { const r = repel(it, snap(p.x,1/6), snap(p.y,1/6)); it.x = r.x; it.y = r.y; }), up(){ repelNote(); }}; }
+  if(h.kind==='start'){ const it = h.it; select({type:'item', id:it.id}); return {move:lazy(p => { const win = myWindow(it, -1), r = repel(it, snap(p.x,1/6), snap(p.y,1/6), win); it.x = r.x; it.y = r.y; dragNear = {it, x:r.x, y:r.y, win}; }), up(){ dragNear = null; drawPlan(); repelNote(); }}; }
   if(h.kind==='step'){ const st = h.st; select({type:'step', id:st.id});
     return {move:lazy(p => { if(st.who){ const nr = nearestRoute(p.x, p.y, 99, getItem(st.who)); if(nr){ st.seg = nr.seg; st.f = r2(nr.f); } }
       else { st.x = snap(p.x,1/6); st.y = snap(p.y,1/6); } }), up(){ renderInspector(); }}; }
@@ -1816,10 +2010,10 @@ function startTool(sx,sy){
       if(h.kind==='handle'){ const it=h.it; let first=true; return {move(x,y){ if(first){checkpoint(); first=false;} const w=toWorld(x,y); it.r = (snap(deg(Math.atan2(w.y-it.y,w.x-it.x)),15)+360)%360; changed(); }, up(){ renderInspector(); }}; }
       if(h.kind==='item'){ const it=h.it; if(!(sel&&sel.type==='item'&&sel.id===it.id)) select({type:'item',id:it.id});
         if(isPerson(it) && TIME>0.001) return null;   // mid-playback: the dashed start ring moves the start point
-        const offx=p.x-it.x, offy=p.y-it.y; let moved=false;
+        const offx=p.x-it.x, offy=p.y-it.y; let moved=false; const b0 = blockedIds();
         return {move(x,y){ if(!moved){ if(Math.hypot(x-sx,y-sy)<5) return; checkpoint(); moved=true; }
           const w=toWorld(x,y); let nx=clamp(snap(w.x-offx,1/6),-2,S.cols+2), ny=clamp(snap(w.y-offy,1/6),-2,S.rows+2);
-          if(isPerson(it)){ const r = repel(it, nx, ny); nx = r.x; ny = r.y; } it.x=nx; it.y=ny; changed(); }, up(){ if(moved) repelNote(); }}; }
+          if(isPerson(it)){ const win = myWindow(it, -1), r = repel(it, nx, ny, win); nx = r.x; ny = r.y; dragNear = {it, x:nx, y:ny, win}; } it.x=nx; it.y=ny; changed(); }, up(){ dragNear = null; drawPlan(); if(moved){ repelNote(); if(FURN[it.k]) noteNewBlocks(b0, FURN[it.k].n.toLowerCase()); else if(isPerson(it)) routeCheckNote(it); } }}; }
       if(h.kind==='arrowEnd'){ const a=h.a; let first=true; return {move(x,y){ if(first){checkpoint(); first=false;} const w=toWorld(x,y); if(h.end){a.x2=snap(w.x,1/6);a.y2=snap(w.y,1/6);} else {a.x1=snap(w.x,1/6);a.y1=snap(w.y,1/6);} changed(); }}; }
       if(h.kind==='arrow'){ const a=h.a; select({type:'arrow',id:a.id}); const o={x1:a.x1,y1:a.y1,x2:a.x2,y2:a.y2}; let moved=false;
         return {move(x,y){ if(!moved){ if(Math.hypot(x-sx,y-sy)<5) return; checkpoint(); moved=true; } const w=toWorld(x,y), dx=snap(w.x-p.x,1/6), dy=snap(w.y-p.y,1/6); a.x1=o.x1+dx;a.y1=o.y1+dy;a.x2=o.x2+dx;a.y2=o.y2+dy; changed(); }}; }
@@ -1847,8 +2041,8 @@ function startTool(sx,sy){
           if(!add.length){ drawPlan(); return; }
           checkpoint(); if(!it.path) it.path = [];
           for(const q of add) it.path.push({x:q.x, y:q.y, sp:sp0, w:0, go:'', g:null});
-          { const e = it.path[it.path.length-1], r = repel(it, e.x, e.y); e.x = r.x; e.y = r.y; repelNote(); }
-          sel = {type:'wp', id:it.id, i:it.path.length-1}; changed(); renderInspector(); },
+          { ver++; const e = it.path[it.path.length-1], r = repel(it, e.x, e.y, myWindow(it, it.path.length-1)); e.x = r.x; e.y = r.y; repelNote(); }
+          sel = {type:'wp', id:it.id, i:it.path.length-1}; changed(); renderInspector(); routeCheckNote(it); },
         cancel(){ preview = null; drawPlan(); }};
     }
     case 'note': {
@@ -1866,20 +2060,20 @@ function startTool(sx,sy){
       return {move(x,y){ let g=gridPt(toWorld(x,y)); if(tool==='wall') g=axisEnd(g0,g); preview.x1=g.x; preview.y1=g.y; drawPlan(); },
         up(){ const g1={x:preview.x1,y:preview.y1}; preview=null;
           if(g1.x===g0.x && g1.y===g0.y){ drawPlan(); return; }
-          checkpoint();
+          const b0 = blockedIds(); checkpoint();
           if(tool==='room' && g1.x!==g0.x && g1.y!==g0.y){
             lineWalls(g0,{x:g1.x,y:g0.y}); lineWalls({x:g1.x,y:g0.y},g1); lineWalls(g1,{x:g0.x,y:g1.y}); lineWalls({x:g0.x,y:g1.y},g0);
           } else lineWalls(g0,axisEnd(g0,g1));
-          changed(); },
+          changed(); noteNewBlocks(b0, tool); },
         cancel(){ preview=null; drawPlan(); }};
     }
     case 'door': case 'opening': case 'window': {
       return {up(x,y){ const w=toWorld(x,y), ne=nearestEdge(w.x,w.y); if(!ne || ne.dist>0.45) return;
-        const t = tool==='door'?'d':tool==='opening'?'o':'n', e = S.edges.get(ne.key);
+        const t = tool==='door'?'d':tool==='opening'?'o':'n', e = S.edges.get(ne.key), b0 = blockedIds();
         checkpoint();
         if(e && e.t==='d' && t==='d'){ e.s=(e.s+1)&3; }
         else S.edges.set(ne.key,{t, s:e&&e.t==='d'?e.s:0, a:e&&e.t==='d'?e.a:0});
-        sel = t==='d' ? {type:'edge',key:ne.key} : null; changed(); renderInspector(); }};
+        sel = t==='d' ? {type:'edge',key:ne.key} : null; changed(); renderInspector(); noteNewBlocks(b0, 'window'); }};
     }
     case 'erase': {
       let first = true;
@@ -1887,6 +2081,7 @@ function startTool(sx,sy){
         const pre = () => { if(first){ checkpoint(); first=false; } };
         if(h && h.kind==='wp'){ pre(); deleteWaypoint(h.it, h.i); did=true; }
         else if(h && h.kind==='look'){ pre(); const w = h.it.path[h.i]; delete w.lx; delete w.ly; did=true; }
+        else if(h && h.kind==='bend'){ const w = h.it.path[h.i]; if(isCurved(w)){ pre(); delete w.cx; delete w.cy; did=true; } }
         else if(h && h.kind==='wloc'){ pre(); h.act.set = 0; did=true; }
         else if(h && h.kind==='alook'){ pre(); const list = h.owner<0 ? h.it.acts : h.it.path[h.owner].acts; const ix = list ? list.indexOf(h.act) : -1; if(ix>=0) list.splice(ix,1); did=true; }
         else if(h && h.kind==='step'){ pre(); S.steps = S.steps.filter(s => s!==h.st); did=true; }
@@ -1899,14 +2094,14 @@ function startTool(sx,sy){
     }
     case 'object': case 'f': case 'h': case 'c': case 'label': {
       return {up(x,y){ const w=toWorld(x,y); if(w.x<-1||w.y<-1||w.x>S.cols+1||w.y>S.rows+1) return;
-        checkpoint();
+        const b0 = blockedIds(); checkpoint();
         const k = tool==='object' ? furnKind : tool;
         const it = {id:newId(), k, x:snap(w.x,1/6), y:snap(w.y,1/6), r:0, l:'', p:0};
         if(isPerson(it)){ it.g = 0; const r = repel(it, it.x, it.y); it.x = r.x; it.y = r.y; }
         if(k==='f'){ it.l = String(S.items.filter(i=>i.k==='f').length+1); }
         if(isPerson(it)) repelNote();
         if(k==='label'){ it.l = 'Room'; }
-        S.items.push(it); sel = {type:'item', id:it.id}; changed(); renderInspector();
+        S.items.push(it); sel = {type:'item', id:it.id}; changed(); renderInspector(); if(FURN[k]) noteNewBlocks(b0, FURN[k].n.toLowerCase());
         if(k==='label'){ const inp=$('#insp-label'); if(inp){ inp.focus(); inp.select(); } } }};
     }
     case 'route': {
@@ -1988,6 +2183,9 @@ pgrid.addEventListener('click', e => { const b = e.target.closest('[data-k]'); i
 /* ---------------- inspector ---------------- */
 const insp = $('#inspector');
 const CLOSE_BTN = '<button class="card-close" data-act="close" aria-label="Close" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+// on a phone the panel can fold down to its title line, so the plan stays usable; the choice is remembered on this device
+let inspMini = false; try{ inspMini = localStorage.getItem('cqb-insp-mini')==='1'; }catch(e){}
+const INSP_BTNS = () => `<div class="card-btns"><button class="card-min" data-act="mini" aria-label="${inspMini ? 'Show the whole panel' : 'Fold the panel down'}" aria-expanded="${!inspMini}" title="${inspMini ? 'Show more' : 'Fold down'}"><svg viewBox="0 0 24 24"><path d="${inspMini ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}"/></svg></button>${CLOSE_BTN}</div>`;
 const seg = (act, opts, cur, cls='') => `<div class="seg ${cls}">${opts.map(([v,n]) => `<button data-act="${act}" data-v="${v}" aria-pressed="${String(cur)===String(v)}">${n}</button>`).join('')}</div>`;
 const stepper = (act, val, unit) => `<div class="stepper"><button data-act="${act}" data-v="-0.5" aria-label="Less">−</button><span>${(+val||0).toFixed(1)} ${unit}</span><button data-act="${act}" data-v="0.5" aria-label="More">+</button></div>`;
 const segA = (act, ai, opts, cur) => `<div class="seg sm">${opts.map(([v,n]) => `<button data-act="${act}" data-ai="${ai}" data-v="${v}" aria-pressed="${String(cur)===String(v)}">${n}</button>`).join('')}</div>`;
@@ -2021,7 +2219,7 @@ function actsEditor(it, owner, oi){
         <button class="btn sm ${dArm?'on':''}" data-act="a-door" data-ai="${ai}">${dArm ? 'Tap a door…' : ok ? 'Change door' : 'Pick the door'}</button>
         <span class="small">${ok ? 'holds until that door ' + (a.at==='start' ? 'starts to open' : 'is half open') : 'No door picked yet.'}</span>`; }
     else if(a.k==='wloc'){ const w = a.who && getItem(a.who), rArm = lookArm && lookArm.route && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
-      const m = w && sched().map.get(w.id), mv = m && a.set && m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? legTime(mv, a.f) : (m && a.set ? m.arr[a.seg] : null);
+      const m = w && sched().map.get(w.id), mv = m && a.set && m.ph.find(q => q.k==='m' && q.leg===a.seg), tt = mv ? legTimeF(mv, a.f) : (m && a.set ? m.arr[a.seg] : null);
       body = `<select data-af="who" data-ai="${ai}" id="af-wl-${ai}" aria-label="Whose route">${others.filter(q => q.path && q.path.length).map(q => `<option value="${q.id}" ${a.who===q.id?'selected':''}>${esc(tagOf(q))}</option>`).join('') || '<option value="">nobody has a route</option>'}</select>
         <button class="btn sm ${rArm?'on':''}" data-act="a-route" data-ai="${ai}">${rArm ? 'Tap his route…' : a.set ? 'Move the spot' : 'Pick the spot'}</button>
         ${stepA('a-off', ai, a.d||0, 's')}<span class="small">${!a.set ? 'Tap the spot on his route.' : tt==null ? 'He never reaches it.' : `he hits it at ${tt.toFixed(1)} s · go ${(a.d||0)===0 ? 'right then' : (a.d<0 ? Math.abs(a.d).toFixed(1)+' s before' : a.d.toFixed(1)+' s after')}`}</span>`; }
@@ -2041,7 +2239,7 @@ function actsEditor(it, owner, oi){
       <div class="act-ctl"><button data-act="a-up" data-ai="${ai}" aria-label="Move up">▲</button><button data-act="a-dn" data-ai="${ai}" aria-label="Move down">▼</button><button data-act="a-del" data-ai="${ai}" aria-label="Remove">✕</button></div></div>`;
   });
   if(!acts.length) h += `<p class="small" style="margin:0">${oi<0 ? 'Nothing. He starts moving right away.' : 'Nothing. He keeps moving.'}</p>`;
-  h += `</div><div class="act-add">${Object.keys(ACT_NAMES).filter(k => !(it.k==='c' && (k==='gun' || k==='bang'))).map(k => `<button class="btn sm" data-act="a-add" data-v="${k}">+ ${ACT_NAMES[k]}</button>`).join('')}</div>
+  h += `</div><div class="act-add">${Object.keys(ACT_NAMES).filter(k => !(it.k==='c' && (k==='gun' || k==='bang'))).map(k => `<button class="btn sm" data-act="a-add" data-v="${k}">+ ${ACT_NAMES[k]}</button>`).join('')}<select class="act-add-sel" data-addsel="1" aria-label="Add an action"><option value="">+ Add an action…</option>${Object.keys(ACT_NAMES).filter(k => !(it.k==='c' && (k==='gun' || k==='bang'))).map(k => `<option value="${k}">${ACT_NAMES[k]}</option>`).join('')}</select></div>
     <datalist id="gate-names">${gateNames().map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>`;
   return h;
 }
@@ -2052,7 +2250,14 @@ function doorSideWarn(a, pos){
   if(Math.hypot(pos.x - c.x, pos.y - c.y) > 1.6) return 'He’s more than 5 ft from the door. Put this action on a waypoint next to it.';
   return '';
 }
-function stuckNote(it){ const sc = sched().map.get(it.id); return sc && sc.stuck ? `<p class="warn">Waits for ${esc(sc.stuck)}. He stops there for good until someone does.</p>` : ''; }
+function stuckNote(it){ const sc = sched().map.get(it.id); if(!sc) return '';
+  if(sc.blocked) return `<p class="warn">His route runs into ${esc(sc.blocked.what || 'a wall')} on the way to waypoint ${sc.blocked.leg + 1}, so he stops there and the rest of it is greyed out. Move that waypoint, or drag the ◆ on the leg to curve around it.</p>`;
+  return sc.stuck ? `<p class="warn">Waits for ${esc(sc.stuck)}. He stops there for good until someone does.</p>` : ''; }
+function routeCheckNote(it){ const m = sched().map.get(it.id); if(m && m.blocked) toast(`${tagOf(it)}’s route runs into ${m.blocked.what || 'a wall'} · he stops there. Move the waypoint or curve the leg around it`); }
+const blockedIds = () => new Set([...sched().map].filter(([, m]) => m.blocked).map(([id]) => id));
+function noteNewBlocks(before, what){ const now = blockedIds(), n = [...now].filter(id => !before.has(id)).length;
+  if(n && sel) renderInspector();
+  if(n) toast(`That ${what} cuts across ${n===1 ? 'a route' : n + ' routes'} · ${n===1 ? 'he stops' : 'they stop'} at it now. Move it, or reroute`); }
 function renderInspectorRO(){
   let h = '';
   if(sel.type==='item'){ const it = getItem(sel.id); if(!isPerson(it)){ insp.hidden = true; return; }
@@ -2065,7 +2270,7 @@ function renderInspectorRO(){
     h = `<div class="insp-head">Note · step ${S.steps.indexOf(st)+1}<span class="note">${st.t.toFixed(1)} s</span></div><p style="margin:0">${esc(st.text)}</p>
       <div class="insp-actions"><button class="btn" data-act="ro-go">Jump here</button></div>`;
   } else { insp.hidden = true; return; }
-  insp.innerHTML = CLOSE_BTN + h; insp.hidden = false;
+  insp.innerHTML = INSP_BTNS() + h; insp.classList.toggle('mini', inspMini); insp.hidden = false;
 }
 function renderInspector(){
   updateTimeline();
@@ -2083,7 +2288,7 @@ function renderInspector(){
       ${stuckNote(it)}
       ${actsEditor(it, it, -1)}
       <div class="insp-row"><span class="lbl">Route</span><div class="row"><button class="btn ${tool==='path'?'on':''}" data-act="draw">${n?'Add to route':'Draw route'}</button>${n?'<button class="btn" data-act="wpfirst">Edit waypoints</button><button class="btn" data-act="rclear">Clear route</button>':''}</div></div>
-      <div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button><button class="btn" data-act="xcross">Crisscross</button><button class="btn" data-act="zipper">Team entry…</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}${seg('mvsp', Object.entries(ZIP_TEMPO).map(([k,v]) => [k, v[0]]), mvSpeed, 'sm')}</div><span class="small">From the end of his route (to start from a waypoint in the middle, tap that waypoint). Button hook pivots around the door frame on his side; Crisscross cuts across to the far side. Either way he digs his corner, with no sweep until you add one. Team entry builds the whole stack.</span></div>
+      <div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button><button class="btn" data-act="xcross">Crisscross</button><button class="btn" data-act="zipper">Team entry…</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}${seg('mvsp', Object.entries(ZIP_TEMPO).map(([k,v]) => [k, v[0]]), mvSpeed, 'sm')}</div><span class="small tip">From the end of his route (to start from a waypoint in the middle, tap that waypoint). Button hook pivots around the door frame on his side; Crisscross cuts across to the far side. Either way he digs his corner, with no sweep until you add one. Team entry builds the whole stack.</span></div>
       <div class="insp-actions"><button class="btn ${on?'on':''}" data-act="los">${on?'Hide':'Show'} what they see</button><button class="btn" data-act="eyes">Ride along</button><button class="btn danger" data-act="del">Delete</button></div>`;
     } else if(it.k==='label'){
       h = `<div class="insp-head">Label</div>
@@ -2102,12 +2307,13 @@ function renderInspector(){
     const spOpts = SPEEDS.map(([v,nm]) => [v,nm]); const spCur = SPEEDS.some(s=>s[0]===w.sp) ? w.sp : 'x';
     if(spCur==='x') spOpts.push(['x', (+w.sp).toFixed(1)+' ft/s']);
     const legArmed = lookArm && lookArm.id===it.id && lookArm.i===sel.i && lookArm.a==null;
-    h = `<div class="insp-head"><span class="sym sym-${it.k}"></span>${esc(tagOf(it))} · waypoint ${sel.i+1}/${n}<span class="note">arrives ${at} s</span></div>
+    h = `<div class="insp-head"><span class="sym sym-${it.k}"></span>${esc(tagOf(it))} · waypoint ${sel.i+1}/${n}<span class="note">${(() => { const sw = stayWindows(it).find(v => v.i===sel.i); return sw && sw.t1 - sw.t0 > 0.05 ? `here ${sw.t0.toFixed(1)} s to ${fmtT(sw.t1)}` : `arrives ${at} s`; })()}</span></div>
     ${stuckNote(it)}
     <div class="insp-row"><span class="lbl">Speed</span>${seg('sp', spOpts, spCur, 'sm')}</div>
-    <div class="insp-row"><span class="lbl">Facing</span>${seg('facing', [['travel','Where he’s walking'],['point','Watch a point']], w.lx!=null ? 'point' : 'travel', 'sm')}<span class="small">${w.lx!=null ? 'Drag the eye to aim it. He turns to it on the way here and keeps watching it.' : 'Or drag the eye next to the waypoint.'}</span></div>
+    <div class="insp-row"><span class="lbl">Leg here</span>${isCurved(w) ? `<span class="small">Curved</span><button class="btn sm" data-act="straight">Straighten</button>` : `<span class="small">Straight</span>`}<span class="small tip">Drag the ◆ halfway along the leg into this waypoint to curve it; drop it back on the line to straighten.</span></div>
+    <div class="insp-row"><span class="lbl">Facing</span>${seg('facing', [['travel','Where he’s walking'],['point','Watch a point']], w.lx!=null ? 'point' : 'travel', 'sm')}<span class="small tip">${w.lx!=null ? 'Drag the eye to aim it. He turns to it on the way here and keeps watching it.' : 'Or drag the eye next to the waypoint.'}</span></div>
     ${actsEditor(it, w, sel.i)}
-    ${`<div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button><button class="btn" data-act="xcross">Crisscross</button><button class="btn" data-act="zipper">Team entry…</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}${seg('mvsp', Object.entries(ZIP_TEMPO).map(([k,v]) => [k, v[0]]), mvSpeed, 'sm')}</div><span class="small">From this waypoint (within about 10 ft of the door, on his side). Button hook pivots around the door frame on his side; Crisscross cuts across to the far side. He digs his corner, with no sweep until you add one. Team entry builds the whole stack from here.</span></div>`}
+    ${`<div class="insp-row"><span class="lbl">Moves</span><div class="row"><button class="btn" data-act="bhook">Button hook</button><button class="btn" data-act="xcross">Crisscross</button><button class="btn" data-act="zipper">Team entry…</button>${seg('bhug', Object.entries(BH_HUG).map(([k,v]) => [k, v[0]]), bhHug, 'sm')}${seg('mvsp', Object.entries(ZIP_TEMPO).map(([k,v]) => [k, v[0]]), mvSpeed, 'sm')}</div><span class="small tip">From this waypoint (within about 10 ft of the door, on his side). Button hook pivots around the door frame on his side; Crisscross cuts across to the far side. He digs his corner, with no sweep until you add one. Team entry builds the whole stack from here.</span></div>`}
     <div class="insp-actions"><button class="btn" data-act="wprev" aria-label="Previous waypoint">◀</button><button class="btn" data-act="wnext" aria-label="Next waypoint">▶</button><button class="btn" data-act="wjump">Jump to ${at} s</button><button class="btn" data-act="wperson">Person</button><button class="btn danger" data-act="del">Delete waypoint</button></div>`;
   } else if(sel.type==='step'){
     const st = getStep(sel.id); if(!st){ sel=null; insp.hidden=true; return; }
@@ -2132,7 +2338,7 @@ function renderInspector(){
     if(e.t==='d'){
       h = `<div class="insp-head">Door<span class="note">3 ft · tap with the Door tool to cycle swing</span></div>
       <div class="insp-row"><span class="lbl">Starts</span>${seg('dstate', [[0,'Closed'],[45,'Ajar'],[90,'Open 90°'],[-1,'Open fully']], e.a)}</div>
-      <p class="small" style="margin:0">Swings up to ${Math.round((doorSims().get(sel.key)||{max:90}).max)}° before it hits something. To have someone open it during the plan, start it closed and give him an “Open door” action.</p>
+      <p class="small tip" style="margin:0">Swings up to ${Math.round((doorSims().get(sel.key)||{max:90}).max)}° before it hits something. To have someone open it during the plan, start it closed and give him an “Open door” action.</p>
       <div class="insp-actions"><button class="btn" data-act="hinge">Flip hinge side</button><button class="btn" data-act="swing">Flip push / pull</button><button class="btn danger" data-act="del">Remove</button></div>`;
     } else {
       h = `<div class="insp-head">${EDGE_NAME[e.t]}</div>
@@ -2140,12 +2346,13 @@ function renderInspector(){
       <div class="insp-actions"><button class="btn danger" data-act="del">Remove</button></div>`;
     }
   }
-  insp.innerHTML = CLOSE_BTN + h; insp.hidden = false;
+  insp.innerHTML = INSP_BTNS() + h; insp.classList.toggle('mini', inspMini); insp.hidden = false;
 }
 insp.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if(!b || !sel) return;
   const act = b.dataset.act, v = b.dataset.v;
   if(act==='close'){ lookArm = null; updateHint(); select(null); return; }
+  if(act==='mini'){ inspMini = !inspMini; try{ localStorage.setItem('cqb-insp-mini', inspMini ? '1' : '0'); }catch(err){} renderInspector(); return; }
   if(act==='ro-los'){ losId = losId===sel.id ? null : sel.id; drawPlan(); renderInspector(); if(T) T.dirty=true; return; }
   if(act==='ro-eyes'){ walkFromId = sel.id; setMode('walk'); return; }
   if(act==='ro-go'){ const st = getStep(sel.id); if(st){ pause(); setTime(st.t); renderInspector(); } return; }
@@ -2177,6 +2384,7 @@ insp.addEventListener('click', e => {
     checkpoint();
     if(act==='sp'){ if(v!=='x') w.sp = +v; }
     else if(act==='lookclear'){ delete w.lx; delete w.ly; }
+    else if(act==='straight'){ delete w.cx; delete w.cy; }
     else if(act==='facing'){ if(v==='travel'){ delete w.lx; delete w.ly; } else if(w.lx==null){ const pts = routePts(it), pr = pts[sel.i], a = Math.atan2(w.y-pr.y, w.x-pr.x) || 0; w.lx = snap(w.x + Math.cos(a)*3, 1/6); w.ly = snap(w.y + Math.sin(a)*3, 1/6); } }
     else if(act==='del'){ it.path.splice(sel.i,1); if(!it.path.length){ delete it.path; sel = {type:'item', id:it.id}; } else sel = {type:'wp', id:it.id, i:Math.min(sel.i, it.path.length-1)}; }
   } else if(sel.type==='step'){
@@ -2288,7 +2496,7 @@ insp.addEventListener('input', e => {
   else if(e.target.id==='insp-st-te'){ const st = getStep(sel.id); const t = +e.target.value; if(!st || !(t>st.t)) return; if(!textCk){ checkpoint(); textCk = true; } st.te = snapT(t); changed(); }
   else if(e.target.id==='insp-st-t'){ const st = getStep(sel.id); const t = +e.target.value; if(!st || !(t>=0)) return; if(!textCk){ checkpoint(); textCk = true; } st.t = snapT(t); changed(); }
 });
-insp.addEventListener('change', e => { if(e.target.dataset && e.target.dataset.af){ textCk = false; if(e.target.tagName==='SELECT') actField(e, true); return; } if(e.target.id==='insp-st-t'){ S.steps.sort((a,b)=>a.t-b.t); changed(); renderInspector(); } });
+insp.addEventListener('change', e => { if(e.target.dataset && e.target.dataset.addsel){ const v = e.target.value; if(v && !READONLY) actClick('a-add', v, NaN); return; } if(e.target.dataset && e.target.dataset.af){ textCk = false; if(e.target.tagName==='SELECT') actField(e, true); return; } if(e.target.id==='insp-st-t'){ S.steps.sort((a,b)=>a.t-b.t); changed(); renderInspector(); } });
 
 /* ---------------- modes ---------------- */
 let walkFromId = null;
@@ -2487,7 +2695,7 @@ function buildFigure(kit, it, idx, col){
   let pivot = null, armL = null;
   const shoulderR = [0, 4.62, 0.48], shoulderL = [0, 4.62, -0.48];
   if(armed){
-    pivot = new THREE.Group(); pivot.position.set(0.25, 4.5, 0.22); body.add(pivot);
+    pivot = new THREE.Group(); pivot.position.set(0.25, 4.5, 0.22); pivot.rotation.order = 'ZXY'; body.add(pivot);
     const gunMat = M.gun, P = (x,y,z) => [x - 0.25, y - 4.5, z - 0.22];  // body coords → pivot coords
     add(pivot, G.stock, gunMat, -0.05, -0.02, 0); add(pivot, G.receiver, gunMat, 0.55, 0, 0); add(pivot, G.rail, f ? M.gunTan : gunMat, 1.3, 0.01, 0);
     add(pivot, G.barrel, gunMat, 1.88, 0.02, 0); add(pivot, G.muzzle, gunMat, 2.15, 0.02, 0);
@@ -2643,11 +2851,11 @@ function build3D(){
   const E = {wall:new THREE.EdgesGeometry(G.wall), head:new THREE.EdgesGeometry(G.head), sill:new THREE.EdgesGeometry(G.sill), slab:new THREE.EdgesGeometry(G.slab)};
   const put = (geo, mat, eg, x, y, z, ry) => { const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); m.rotation.y = ry; m.castShadow = true; m.receiveShadow = true; root.add(m);
     if(eg){ const l = new THREE.LineSegments(eg, edgeMat); l.position.copy(m.position); l.rotation.y = ry; root.add(l); } return m; };
-  T.segs = [];
+  T.segs = []; T.gunSegs = [];
   for(const [k,e] of S.edges){
     const [d,x,y] = parseKey(k), cx = d==='h'?(x+.5)*FT:x*FT, cz = d==='h'?y*FT:(y+.5)*FT, ry = d==='h'?0:Math.PI/2, p = edgePts(d,x,y).map(v=>v*FT);
-    if(e.t==='w'){ put(G.wall, wallMat, E.wall, cx, WALL_H/2, cz, ry); T.segs.push(p); }
-    else if(e.t==='n'){ put(G.sill, wallMat, E.sill, cx, 1.5, cz, ry); put(G.head, wallMat, E.head, cx, 7.5, cz, ry); put(G.glass, glassMat, null, cx, 5, cz, ry); T.segs.push(p); }
+    if(e.t==='w'){ put(G.wall, wallMat, E.wall, cx, WALL_H/2, cz, ry); T.segs.push(p); T.gunSegs.push([...p, TH/2]); }
+    else if(e.t==='n'){ put(G.sill, wallMat, E.sill, cx, 1.5, cz, ry); put(G.head, wallMat, E.head, cx, 7.5, cz, ry); put(G.glass, glassMat, null, cx, 5, cz, ry); T.segs.push(p); T.gunSegs.push([...p, TH/2]); }
     else { put(G.head, wallMat, E.head, cx, 7.5, cz, ry);
       if(e.t==='d'){ const s0 = doorSlab(d,x,y,e,0), grp = new THREE.Group(); grp.position.set(s0.hx*FT, 0, s0.hy*FT);
         grp.add(new THREE.Mesh(G.slab, doorMat)); grp.add(new THREE.LineSegments(E.slab, edgeMat));
@@ -2664,13 +2872,17 @@ function build3D(){
     else { const g = new THREE.BoxGeometry(f.w, f.h, f.d); const m = new THREE.Mesh(g, mat); m.position.set(it.x*FT, f.h/2, it.y*FT); m.rotation.y = -rad(it.r||0); m.castShadow = true; m.receiveShadow = true; root.add(m);
       const l = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat); l.position.copy(m.position); l.rotation.copy(m.rotation); root.add(l);
       if(it.k==='couch'){ const b = new THREE.Mesh(new THREE.BoxGeometry(f.w, 1.2, 0.7), mat); const r = rad(it.r||0); b.position.set(it.x*FT + Math.sin(r)*(f.d/2-0.35), f.h+0.6, it.y*FT - Math.cos(r)*(f.d/2-0.35)); b.rotation.y = -r; root.add(b); } }
-    const c = rectCorners(it); for(let i=0;i<4;i++){ const a=c[i], b=c[(i+1)%4]; T.segs.push([a[0]*FT,a[1]*FT,b[0]*FT,b[1]*FT]); }
+    const c = rectCorners(it); for(let i=0;i<4;i++){ const a=c[i], b=c[(i+1)%4]; T.segs.push([a[0]*FT,a[1]*FT,b[0]*FT,b[1]*FT]); if(f.h >= 4.2) T.gunSegs.push([a[0]*FT,a[1]*FT,b[0]*FT,b[1]*FT,0.02]); }
   }
   // routes on the floor
   T.routes = new THREE.Group(); T.routes.visible = routesOn; root.add(T.routes);
   for(const it of S.items){ if(!isPerson(it) || !it.path || !it.path.length) continue;
     const col = it.k==='f'?C.friend:it.k==='h'?C.hostile:C.civ, pts = [{x:it.x,y:it.y}, ...it.path];
-    const pos = []; for(let i=1;i<pts.length;i++) pos.push(pts[i-1].x*FT,0.06,pts[i-1].y*FT, pts[i].x*FT,0.06,pts[i].y*FT);
+    const blk = (sched().map.get(it.id)||{}).blocked, pos = [];
+    for(let i=1;i<pts.length;i++){ if(blk && i-1 > blk.leg) break;
+      let P = legPoly(pts[i-1], pts[i]); if(blk && i-1===blk.leg){ const fe = legNearest(pts[i-1], pts[i], blk.x, blk.y).f; P = P.slice(0, Math.max(1, Math.round(fe*(P.length-1)))).concat([{x:blk.x, y:blk.y}]); }
+      for(let k=1;k<P.length;k++) pos.push(P[k-1].x*FT,0.06,P[k-1].y*FT, P[k].x*FT,0.06,P[k].y*FT); }
+    if(!pos.length) continue;
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
     const ln = new THREE.LineSegments(g, new THREE.LineDashedMaterial({color:col, dashSize:0.8, gapSize:0.6, transparent:true, opacity:.6}));
     ln.computeLineDistances(); T.routes.add(ln); }
@@ -2750,16 +2962,28 @@ function updateDyn(dt){
     if(p.sigSp) p.sigSp.position.set(ps.x*FT, (p.it.p?5.6:7.3) + 1.3, ps.y*FT);
     if(ps.sig && ps.sig.s==='nod'){ p.head.rotation.z = -Math.abs(Math.sin(now*7))*0.45; busy = true; } else p.head.rotation.z = 0;
     if(p.pivot){
-      const gstate = p.gstate, target = GUN_PITCH[gstate];
-      if(p.pitch===null) p.pitch = target;
-      const d = target - p.pitch; if(Math.abs(d) > 0.005){ p.pitch += d*Math.min(1, dt*10); busy = true; } else p.pitch = target;
+      const gstate = p.gstate, want = GUN_PITCH[gstate], room = Math.max(0, gunRoom(ps) - 4.5*Math.sin(Math.max(0, -(p.lean||0))));
+      if(p.pitch===null) p.pitch = gunPitchFor(want, room, null);
+      const target = gunPitchFor(want, room, p.pitch);
+      // getting out of a wall is quick (a flick of the muzzle); settling back is the usual easy move
+      const d = target - p.pitch, fix = gunPitchFor(p.pitch, room, p.pitch);
+      if(fix!==p.pitch) p.pitch = fix;
+      else if(Math.abs(d) > 0.005){ p.pitch += d*Math.min(1, dt*10); busy = true; } else p.pitch = target;
+      const back = gunBack(p.pitch, room), cant = elbowCant(ps);
+      p.back = p.back==null ? back : (back > p.back ? back : p.back + (back - p.back)*Math.min(1, dt*8));
+      p.cant = p.cant==null ? cant : (cant > p.cant ? cant : p.cant + (cant - p.cant)*Math.min(1, dt*8));
+      // drawn right in, the rifle also comes across to the middle of his chest
+      p.pivot.position.x = 0.25 - p.back; p.pivot.position.z = 0.22 - 0.2*clamp(p.back/0.3, 0, 1); p.pivot.rotation.x = p.cant;
+      if(p.back > 0.01 || p.cant > 0.01) busy = busy || playing;
       // a little rifle movement in time with his steps
-      const gw = p.gait || {ph:0, amp:0}; p.pivot.rotation.z = p.pitch + Math.sin(gw.ph*2)*0.018*gw.amp;
+      const gw = p.gait || {ph:0, amp:0}; p.wig = Math.sin(gw.ph*2)*0.018*gw.amp; p.pivot.rotation.z = p.pitch + p.wig;
       if(gstate===3){ const w = now*9; p.pivot.rotation.y = Math.cos(w)*0.16; p.pivot.rotation.z = p.pitch + 0.06 + Math.sin(w)*0.16; busy = true; }   // lasso: the muzzle traces a circle
       else p.pivot.rotation.y = Math.sin(gw.ph)*0.025*gw.amp;
     }
   }
   { const byId = {}; for(const p of T.people) byId[p.it.id] = p; for(const p of T.people){ const ps = poseAt(p.it, TIME); if(animateActions(p, ps, byId, now)) busy = true; } }
+  // last check, on the finished pose (lean, actions and all): if any part of the rifle still touches a surface, tip it further
+  { const byId = {}; for(const p of T.people) byId[p.it.id] = p; for(const p of T.people) if(p.pivot && p.gstate!==3) gunUnclip(p, byId, now); }
   const lp = losId && getItem(losId);
   const key = [TIME.toFixed(2), losId, threatOn, ver].join('|');
   if(key !== T.dynKey){ T.dynKey = key; disposeTree(T.dyn); const C = T.colors;
@@ -2769,6 +2993,67 @@ function updateDyn(dt){
   if(mode==='walk' && T.walk.ride){ const it = walkFromId && getItem(walkFromId);
     if(it){ const ps = poseAt(it, TIME); T.walk.x = ps.x*FT; T.walk.z = ps.y*FT; T.walk.yaw = rad(ps.r||0) + T.walk.look; } }
   return busy;
+}
+/* ---- rifles don't go through walls ----
+   Each frame we look along each man's rifle (at its height, three lines across its width) for the first wall, window,
+   door slab or tall piece of furniture. If the rifle as he's carrying it would reach past that, he tips the muzzle out of
+   the way the way a shooter does in a tight spot: dipped if he's aiming or at low ready, raised if he's at high ready,
+   just as far as it takes. His support hand rides along on the handguard, so the arms follow the rifle. */
+const GUN_L = 2.3, GUN_PAD = 0.1;   // muzzle reach from the rifle's pivot (ft); clearance kept from a surface
+function gunRoom(ps){
+  const r = rad(ps.r||0), c = Math.cos(r), s = Math.sin(r), X = ps.x*FT, Z = ps.y*FT;
+  const near = (T.gunSegs||[]).filter(q => distSeg(X, Z, q[0], q[1], q[2], q[3]) < GUN_L + 1);
+  for(const dr of (T.doors||[])){ const d = doorSlab(dr.d, dr.x, dr.y, dr.e, doorAngle(dr.k, TIME)), q = [d.hx*FT, d.hy*FT, d.ex*FT, d.ey*FT, 0.07];
+    if(distSeg(X, Z, q[0], q[1], q[2], q[3]) < GUN_L + 1) near.push(q); }
+  if(!near.length) return 99;
+  let best = 99;
+  for(const l of [0.1, 0.22, 0.34]){ const bx = X + 0.25*c - l*s, bz = Z + 0.25*s + l*c;
+    for(let t = 0; t <= GUN_L + 0.01 && t < best; t += 0.06){ const px = bx + c*t, pz = bz + s*t;
+      if(near.some(q => distSeg(px, pz, q[0], q[1], q[2], q[3]) < q[4] + 0.06 + GUN_PAD)){ best = t; break; } } }
+  return best;
+}
+// the muzzle angle that keeps the rifle short of a surface `room` ft ahead of the pivot, starting from the posture he wants.
+// Up or down follows the posture, except that once the muzzle is tipped one way it stays that way until there's room:
+// swinging it from dipped to raised would sweep it through the wall.
+const GUN_MAX = 1.4;
+function gunPitchFor(want, room, cur){
+  if(want===null || room >= GUN_L*Math.cos(want) - 1e-3) return want;
+  let up = want > 0.5; if(cur!=null && Math.abs(cur) > 0.3 && (cur > 0)!==up) up = cur > 0;
+  const need = Math.acos(clamp(room/GUN_L, Math.cos(GUN_MAX), 1));
+  return up ? Math.min(GUN_MAX, Math.max(want, need)) : Math.max(-GUN_MAX, Math.min(want, -need));
+}
+// right up against a surface even the steepest tip isn't enough: he draws the rifle back into his chest
+const gunBack = (pitch, room) => clamp(GUN_L*Math.cos(pitch) - room, 0, 0.55);
+// how much he cants the rifle to tuck his right elbow in when a wall is close on his right
+function elbowCant(ps){
+  const r = rad(ps.r||0), c = Math.cos(r), s = Math.sin(r), ex = ps.x*FT + 0.07*c - 0.64*s, ez = ps.y*FT + 0.07*s + 0.64*c;
+  let gap = 9;
+  for(const q of (T.gunSegs||[])) gap = Math.min(gap, distSeg(ex, ez, q[0], q[1], q[2], q[3]) - q[4]);
+  for(const dr of (T.doors||[])){ const d = doorSlab(dr.d, dr.x, dr.y, dr.e, doorAngle(dr.k, TIME)); gap = Math.min(gap, distSeg(ex, ez, d.hx*FT, d.hy*FT, d.ex*FT, d.ey*FT) - 0.07); }
+  const need = 0.1 - gap; if(need <= 0) return 0;
+  for(let th = 0.05; th <= 0.9; th += 0.05){ if(0.42 - (0.42*Math.cos(th) - 0.55*Math.sin(th)) >= need) return th; }
+  return 0.9;
+}
+const GUN_PTS = [[2.27,0.02,0],[1.95,0.02,0],[1.6,0.01,0],[1.25,-0.06,0],[0.9,0,0],[0.55,0,0],[-0.27,-0.02,0]];
+function gunUnclip(p, byId, now){
+  const X = p.g.position.x, Z = p.g.position.z, near = (T.gunSegs||[]).filter(q => distSeg(X, Z, q[0], q[1], q[2], q[3]) < 3.4);
+  for(const dr of (T.doors||[])){ const d = doorSlab(dr.d, dr.x, dr.y, dr.e, doorAngle(dr.k, TIME)), q = [d.hx*FT, d.hy*FT, d.ex*FT, d.ey*FT, 0.07];
+    if(distSeg(X, Z, q[0], q[1], q[2], q[3]) < 3.4) near.push(q); }
+  if(!near.length) return;
+  const v = new THREE.Vector3();
+  const touching = () => { p.g.updateMatrixWorld(true);
+    for(const pt of GUN_PTS){ p.pivot.localToWorld(v.set(pt[0], pt[1], pt[2])); if(v.y > WALL_H + 0.1) continue;
+      for(const q of near) if(distSeg(v.x, v.z, q[0], q[1], q[2], q[3]) < q[4] + 0.08) return true; }
+    return false; };
+  let moved = false;
+  for(let k = 0; k < 16 && touching(); k++){ moved = true;
+    const dir = p.pitch > 0.25 ? 1 : p.pitch < -0.25 ? -1 : (GUN_PITCH[p.gstate] > 0.5 ? 1 : -1);
+    if(Math.abs(p.pitch) < GUN_MAX - 1e-3) p.pitch = clamp(p.pitch + dir*0.1, -GUN_MAX, GUN_MAX);
+    else if((p.back||0) < 0.55) p.back = Math.min(0.55, (p.back||0) + 0.1);
+    else break;
+    p.pivot.rotation.z = p.pitch + (p.wig||0); p.pivot.position.x = 0.25 - (p.back||0); p.pivot.position.z = 0.22 - 0.2*clamp((p.back||0)/0.3, 0, 1);
+  }
+  if(moved) animateActions(p, poseAt(p.it, TIME), byId, now);   // his support hand follows the rifle to its new spot
 }
 function blocked(x,z){ for(const s of T.segs){ if(distSeg(x,z,s[0],s[1],s[2],s[3])<0.85) return true; } return false; }
 function stepWalk(dt){
@@ -3132,7 +3417,7 @@ function sampleDrill(){
       [8.2,7.4,3, 0, 10.5,10.3]]],
     ['f',2.6,5.4,0,'4',0, 0, 0, [
       [7.4,5.2,5, [['l',1.5,5.2,0],['g',2],['m',2,0.8]]],                 // rear security, moves with #3
-      [9.4,5.5,5, 0],
+      [9.9,5.6,5, 0],
       [10.5,6.7,5, 0, 12,9],
       [11.7,8.8,4, 0, 11.4,10.8]]],                                       // flows LEFT, opposite #3's gun
     ['h',7.9,10.3,315,'',0, 2],
@@ -3996,6 +4281,7 @@ function insertMove(it, from, pts, sp){
   const k = pts.length;
   for(const a of routeAnchors(it)) if(a.seg >= from + 1) a.seg += k;
   it.path.splice(from + 1, 0, ...pts.map(q => ({x:r2(q.x), y:r2(q.y), sp, w:0, go:'', g:null, lx:r2(q.look.x), ly:r2(q.look.y)})));
+  { const after = it.path[from + 1 + pts.length]; if(after){ delete after.cx; delete after.cy; } }
   return k;
 }
 function entryMove(it, from, kind){
@@ -4167,7 +4453,7 @@ function buildZipper(){
     // the spot where the man ahead crosses the door line
     const tp = scan(pq, crosses), mp = sched().map.get(pq.id);
     let seg, f;
-    if(tp!=null){ const ph = mp.ph.find(x => x.k==='m' && tp >= x.t0 - 1e-6 && tp <= x.t1 + 1e-6); if(ph){ seg = ph.leg; f = r2(legFrac(ph, tp).s); } }
+    if(tp!=null){ const ph = mp.ph.find(x => x.k==='m' && tp >= x.t0 - 1e-6 && tp <= x.t1 + 1e-6); if(ph){ seg = ph.leg; f = r2(legFrac(ph, tp).s*(ph.fe==null ? 1 : ph.fe)); } }
     if(seg==null){ const last = (pq.path||[]).length - 1; seg = last; f = 1; }
     // how long he takes from stepping off to crossing the door line himself
     const mv = (sched().map.get(q.id)||{ph:[]}).ph.find(x => x.k==='m' && x.leg===from + 1) || firstMove(q), tx = scan(q, crosses);
