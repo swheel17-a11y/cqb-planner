@@ -529,6 +529,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
       <div class="block" id="zip-first-block"><h3>First man</h3><div class="seg"><button data-zfirst="hook">Button hook (his side)</button><button data-zfirst="cross">Crisscross (far side)</button></div></div>
       <div class="block"><h3>Speed</h3><div class="seg"><button data-ztempo="d">Deliberate</button><button data-ztempo="s">Steady</button><button data-ztempo="x">Dynamic</button></div><h3 style="margin-top:6px">Time between men at the door</h3><div class="seg"><button data-zgap="0.25">¼ s</button><button data-zgap="0.35">⅓ s</button><button data-zgap="0.5">½ s</button></div><p class="small" id="zip-tempo-help" style="margin:0"></p></div>
       <div class="block"><label class="zip-chk"><input type="checkbox" id="zip-tighten"> Close the stack up first (about 1.4 ft apart), then #1 goes. Needed for a quarter-second rhythm if they’re standing spread out.</label></div>
+      <div class="block"><label class="zip-chk"><input type="checkbox" id="zip-bang"> Flashbang first: #1 gives the bang call, the man behind him puts his hand on #1's fist, preps the bang, steps off the wall and hooks it in. The team floods on the bang.</label></div>
       <div class="block"><label class="zip-chk"><input type="checkbox" id="zip-sectors"> After clearing his corner, each man pauses, then turns to work his sector</label></div>
       <p class="small" style="margin:0">This replaces what these men do past the door. Undo puts it back. Hug distance follows Tight / Normal / Wide.</p>
       <div class="row"><button class="btn primary" id="zip-build">Build the entry</button></div>
@@ -665,8 +666,11 @@ const SPEEDS = [[3,'Slow'],[5,'Walk'],[9,'Fast']];  // feet per second
 const GO = ['A','B','C'];
 const SIGS = {nod:'Nod', tri:'Tricep squeeze', sho:'Shoulder squeeze', thumb:'Thumbs up', point:'Point', call:'Verbal call', wig:'Gun wiggle', hr:'High ready', lr:'Low ready'};
 // gun posture shown for a moment by a signal: high ready, low ready, or the wiggle
+// what a signal looks like on the plan (the hand signals above plus the flashbang drill's own gestures)
+const SIG_LABEL = {...SIGS, bcall:'Bang call', fist:'Fist up · waiting', bgot:'Signal received', bprep:'Prepping bang', bang:'Bang out'};
+const BCALL = {pump:1.5, got:0.6, prep:0.9};   // fist pumps x3; hand on his fist; bang off the kit and ready
 const sigGun = sig => !sig ? null : sig.s==='hr' ? 1 : sig.s==='lr' ? 0 : sig.s==='wig' ? 3 : null;
-const ACT_NAMES = {look:'Look at', gun:'Gun', wait:'Wait', door:'Open door', wdoor:'Wait for door', mwith:'Move with', wloc:'Move when he reaches…', bang:'Throw flashbang', wbang:'Move on bang', sig:'Signal', wsig:'Wait for signal', open:'Open gate', gate:'Wait for gate', sync:'Sync'};
+const ACT_NAMES = {look:'Look at', gun:'Gun', wait:'Wait', door:'Open door', wdoor:'Wait for door', mwith:'Move with', wloc:'Move when he reaches…', bcall:'Call for a bang', btake:'Take the bang call', bang:'Throw flashbang', wbang:'Move on bang', sig:'Signal', wsig:'Wait for signal', open:'Open gate', gate:'Wait for gate', sync:'Sync'};
 const CONE_DEG = 100, CONE_LEN = 7;          // view cone width and reach (squares)
 
 const ICON = {
@@ -765,7 +769,9 @@ function packActs(acts){
       case 'sync': return ['y', a.c||'A'];
       case 'door': return ['d', a.key||'', a.how||'hand', a.name||''];
       case 'wdoor': return ['D', a.key||'', a.at||'half'];
-      case 'bang': return ['b', r2(a.x), r2(a.y), r2(a.fuse||1.5)];
+      case 'bang': return ['b', r2(a.x), r2(a.y), r2(a.fuse||1.5), a.hook?1:0];
+      case 'bcall': return ['C', a.to ? S.items.findIndex(i => i.id===a.to) : -1];
+      case 'btake': return ['T', a.from ? S.items.findIndex(i => i.id===a.from) : -1, a.how==='nod' ? 'nod' : 'hand'];
       case 'wbang': return ['W', a.by ? S.items.findIndex(i => i.id===a.by) : -1, r2(a.d||0)];
       case 'wloc': return ['L', a.who ? S.items.findIndex(i => i.id===a.who) : -1, a.seg|0, r2(a.f||0), r2(a.d||0), a.set?1:0];
       case 'mwith': return ['m', a.who ? S.items.findIndex(i => i.id===a.who) : -1, r2(a.d||0)];
@@ -799,7 +805,9 @@ function unpackActs(arr, num){
       case 'l': out.push({k:'look', x:num(q[1],0), y:num(q[2],0), d:clamp(num(q[3],0),0,600), sw:clamp(q[4]|0,0,5)}); break;
       case 'g': out.push({k:'gun', g:clamp(q[1]|0,0,3)}); break;
       case 'w': out.push({k:'wait', d:clamp(num(q[1],0),0,600)}); break;
-      case 'b': out.push({k:'bang', x:num(q[1],0), y:num(q[2],0), fuse:clamp(num(q[3],1.5),0.5,5)}); break;
+      case 'b': out.push({k:'bang', x:num(q[1],0), y:num(q[2],0), fuse:clamp(num(q[3],1.5),0.5,5), hook:q[4]?1:0}); break;
+      case 'C': out.push({k:'bcall', toIdx:q[1]|0}); break;
+      case 'T': out.push({k:'btake', fromIdx:q[1]|0, how:q[2]==='nod' ? 'nod' : 'hand'}); break;
       case 'W': out.push({k:'wbang', byIdx:q[1]|0, d:clamp(num(q[2],0),-3,5)}); break;
       case 'D': out.push({k:'wdoor', key:String(q[1]||''), at:q[2]==='start'?'start':'half'}); break;
       case 'L': out.push({k:'wloc', whoIdx:q[1]|0, seg:q[2]|0, f:clamp(num(q[3],0),0,1), d:clamp(num(q[4],0),-10,5), set:q[5]?1:0}); break;
@@ -863,7 +871,7 @@ function fromData(d){
     }
     s.items.push(o); });
   // signal targets were saved by position in the list
-  const fix = acts => { if(acts) for(const a of acts){ if(a.k==='sig'){ a.to = idxToId.get(a.toIdx) || null; delete a.toIdx; } if(a.k==='wsig'){ a.from = idxToId.get(a.fromIdx) || ''; delete a.fromIdx; } if(a.k==='mwith' || a.k==='wloc'){ a.who = idxToId.get(a.whoIdx) || ''; delete a.whoIdx; } if(a.k==='wbang'){ a.by = a.byIdx>=0 ? (idxToId.get(a.byIdx) || '') : ''; delete a.byIdx; } } };
+  const fix = acts => { if(acts) for(const a of acts){ if(a.k==='sig' || a.k==='bcall'){ a.to = idxToId.get(a.toIdx) || null; delete a.toIdx; } if(a.k==='wsig' || a.k==='btake'){ a.from = idxToId.get(a.fromIdx) || ''; delete a.fromIdx; } if(a.k==='mwith' || a.k==='wloc'){ a.who = idxToId.get(a.whoIdx) || ''; delete a.whoIdx; } if(a.k==='wbang'){ a.by = a.byIdx>=0 ? (idxToId.get(a.byIdx) || '') : ''; delete a.byIdx; } } };
   for(const it of s.items){ fix(it.acts); if(it.path) it.path.forEach(w => fix(w.acts)); }
   for(const a of (d.a||[])){ if(!Array.isArray(a)) continue;
     s.arrows.push({id:newId(), x1:num(a[0],0), y1:num(a[1],0), x2:num(a[2],0), y2:num(a[3],0), c:clamp(a[4]|0,0,2)}); }
@@ -1061,8 +1069,8 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
       else if(a.k==='open'){ const n = a.name; if(opens[n]==null || t < opens[n]) opens[n] = t; fired.push({name:n, t}); }
       else if(a.k==='gate'){ const rt = gates[a.name]; if(rt==null){ stuck = `gate “${a.name}”, but nobody opens it`; return false; } hold(rt - t); }
       else if(a.k==='bang'){ const tgt = {x:a.x, y:a.y}, turn = turnTime(r, angTo(x,y,tgt)); look = tgt;
-        const t0 = t + turn + BANG.windup; sigs.push({t0:t, t1:t0 + 0.3, s:'bang', txt:'Bang out', tx:a.x, ty:a.y});
-        bangs.push({by:it.id, t0, x0:x, y0:y, tx:a.x, ty:a.y, fuse:a.fuse||1.5, det:t0 + (a.fuse||1.5)}); hold(turn + BANG.windup + 0.25); }
+        const t0 = t + turn + BANG.windup; sigs.push({t0:t, t1:t0 + 0.3, s:'bang', txt:'Bang out', tx:a.x, ty:a.y, hook:!!a.hook});
+        bangs.push({by:it.id, t0, x0:x, y0:y, tx:a.x, ty:a.y, fuse:a.fuse||1.5, det:t0 + (a.fuse||1.5), hook:!!a.hook}); hold(turn + BANG.windup + 0.25); }
       else if(a.k==='wbang'){   // moves when the bang goes off (offset can be negative to step off just before)
         const got = (bangsPrev||[]).filter(q => !used.has(q) && (!a.by || q.by===a.by)).sort((p,q) => p.det-q.det)[0];
         if(!got){ const who = a.by && S.items.find(i => i.id===a.by); stuck = `a flashbang${who ? ' from '+tagOf(who) : ''}, but nobody throws one`; return false; }
@@ -1084,6 +1092,20 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
         const mv = m.ph.find(q => q.k==='m' && q.t1 > t + 0.02);
         if(!mv){ stuck = `${who ? tagOf(who) : 'his teammate'} to move, but he never moves again`; return false; }
         hold(Math.max(t, mv.t0) + (a.d||0) - t); }
+      else if(a.k==='bcall'){   // flashbang call: arm up, opens and closes his fist three times
+        const who = a.to && S.items.find(i => i.id===a.to);
+        sigs.push({t0:t, t1:t + BCALL.pump, s:'bcall', to:a.to || null}); hold(BCALL.pump);
+        if(who){   // in a stack: the fist stays up until the man behind puts his hand on it
+          const got = (recv[it.id]||[]).filter(q => !used.has(q) && q.from===a.to && (q.s==='bgot' || q.s==='nod')).sort((p,q) => p.t-q.t)[0];
+          if(!got){ stuck = `${tagOf(who)} to take the bang call (give him “Take the bang call”)`; return false; }
+          used.add(got); if(got.t > t){ sigs.push({t0:t, t1:got.t, s:'fist', to:a.to}); hold(got.t - t); } } }
+      else if(a.k==='btake'){   // takes the bang call: waits for it, hand on the caller's fist, then gets the bang out
+        const got = (recv[it.id]||[]).filter(q => !used.has(q) && (!a.from || q.from===a.from) && q.s==='bcall').sort((p,q) => p.t-q.t)[0];
+        if(!got){ const who = a.from && S.items.find(i => i.id===a.from); stuck = `a bang call${who ? ' from '+tagOf(who) : ''}, but nobody makes one`; return false; }
+        used.add(got); hold(got.t - t);
+        // signal received: hand on the caller's fist, or a nod if he's across the door and can't reach it
+        sigs.push({t0:t, t1:t + BCALL.got, s:a.how==='nod' ? 'nod' : 'bgot', to:got.from}); hold(BCALL.got);
+        sigs.push({t0:t, t1:t + BCALL.prep, s:'bprep'}); hold(BCALL.prep); }
       else if(a.k==='wsig'){   // holds until a matching signal sent to him is finished; each wait uses up one signal
         const got = (recv[it.id]||[]).filter(q => !used.has(q) && (!a.from || q.from===a.from) && (!a.s || q.s===a.s)).sort((p,q) => p.t-q.t)[0];
         if(!got){ const who = a.from && S.items.find(i => i.id===a.from); stuck = `${a.s ? 'a '+SIGS[a.s].toLowerCase() : 'a signal'}${who ? ' from '+tagOf(who) : ''}, but nobody sends it to him`; return false; }
@@ -1150,7 +1172,7 @@ function buildSched0(s){
       o.start = Math.min(o.start, st); o.half = o.half==null ? hf : Math.min(o.half, hf); }
     for(const k in ndoorT) if(ndoorT[k].half==null) delete ndoorT[k].half;
     const moves = {}; for(const [id, m] of map) moves[id] = m.ph.filter(q => q.k==='m').map(q => Math.round(q.t0*1e4));
-    const nrecv = {}; for(const [id, m] of map) for(const q of m.sigs) if(q.to && q.s!=='door') (nrecv[q.to] = nrecv[q.to] || []).push({from:id, s:q.s, t:q.t1});
+    const nrecv = {}; for(const [id, m] of map) for(const q of m.sigs) if(q.to && q.s!=='door' && q.s!=='fist') (nrecv[q.to] = nrecv[q.to] || []).push({from:id, s:q.s, t:q.t1});
     const nr = {}; for(const c of GO) if(arrive[c] && arrive[c].length) nr[c] = Math.max(...arrive[c]) + 0.4;
     const key = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
     const same = key(nr)===key(rel) && key(opens)===key(gates) && key(nrecv)===key(recv) && key(ndoorT)===key(doorT) && prev && key(moves)===key(prevMoves) && JSON.stringify(bangs.map(b => [b.by, Math.round(b.det*1e4)]))===JSON.stringify(bangsPrev.map(b => [b.by, Math.round(b.det*1e4)]));
@@ -1309,7 +1331,17 @@ function bangPaths(){
   if(BP && BPver===ver) return BP;
   BP = []; BPver = ver;
   for(const b of sched().bangs){
-    const segs = bangBlockers(b.t0), R = Math.hypot(b.tx-b.x0, b.ty-b.y0)*FT;
+    const segs = bangBlockers(b.t0);
+    // a hook throw from beside the door bends round the frame: it goes through the doorway on its way to the spot
+    if(b.hook && firstHit(b.x0, b.y0, b.tx, b.ty, segs).hit){ let best = null;
+      for(const [k,e] of S.edges){ if(e.t!=='d' && e.t!=='o') continue; const c = doorCenter(k); if(Math.hypot(c.x-b.x0, c.y-b.y0) > 3.5) continue;
+        if(firstHit(b.x0, b.y0, c.x, c.y, segs).hit || firstHit(c.x, c.y, b.tx, b.ty, segs).hit) continue;
+        const L = Math.hypot(c.x-b.x0, c.y-b.y0) + Math.hypot(b.tx-c.x, b.ty-c.y); if(!best || L < best.L) best = {x:c.x, y:c.y, L}; }
+      if(best){ const L1 = Math.hypot(best.x-b.x0, best.y-b.y0), R = best.L*FT, ux = (b.tx-best.x)/(Math.hypot(b.tx-best.x, b.ty-best.y)||1), uy = (b.ty-best.y)/(Math.hypot(b.tx-best.x, b.ty-best.y)||1);
+        const lx = b.tx, ly = b.ty, r2x = lx + ux*0.35, r2y = ly + uy*0.35, rh = firstHit(lx, ly, r2x, r2y, segs);
+        BP.push({...b, via:{x:best.x, y:best.y, f:L1/best.L}, lx, ly, rx:lx + (r2x-lx)*Math.max(0, rh.s-0.1), ry:ly + (r2y-ly)*Math.max(0, rh.s-0.1),
+          flight:clamp(0.3 + R*0.03, 0.35, 1.3), apex:clamp(R*0.08, 0.8, 3), blocked:false}); continue; } }
+    const R = Math.hypot(b.tx-b.x0, b.ty-b.y0)*FT;
     const h = firstHit(b.x0, b.y0, b.tx, b.ty, segs);
     let lx = b.x0 + (b.tx-b.x0)*h.s, ly = b.y0 + (b.ty-b.y0)*h.s;
     const ux = (b.tx-b.x0)/(R/FT||1), uy = (b.ty-b.y0)/(R/FT||1);
@@ -1326,7 +1358,11 @@ function bangPaths(){
 function bangAt(p, t){
   if(t < p.t0) return null;
   const tl = p.t0 + p.flight;
-  if(t < tl){ const f = (t - p.t0)/p.flight; return {x:p.x0+(p.lx-p.x0)*f, y:p.y0+(p.ly-p.y0)*f, z:5*(1-f) + 4*p.apex*f*(1-f), state:'air'}; }
+  if(t < tl){ const f = (t - p.t0)/p.flight, z0 = p.hook ? 3.6 : 5;
+    if(p.via){ const v = p.via, a = f < v.f ? f/v.f : 1, b = f < v.f ? 0 : (f - v.f)/(1 - v.f);
+      const x = f < v.f ? p.x0 + (v.x-p.x0)*a : v.x + (p.lx-v.x)*b, y = f < v.f ? p.y0 + (v.y-p.y0)*a : v.y + (p.ly-v.y)*b;
+      return {x, y, z:z0*(1-f) + 4*p.apex*f*(1-f), state:'air'}; }
+    return {x:p.x0+(p.lx-p.x0)*f, y:p.y0+(p.ly-p.y0)*f, z:z0*(1-f) + 4*p.apex*f*(1-f), state:'air'}; }
   const f = clamp((t - tl)/BANG.roll, 0, 1), e = 1-(1-f)*(1-f);
   return {x:p.lx+(p.rx-p.lx)*e, y:p.ly+(p.ry-p.ly)*e, z:0, state: t < p.det ? 'live' : 'spent'};
 }
@@ -1740,7 +1776,7 @@ function drawPlan(){
     if(ps.sig){ const to = ps.sig.to && getItem(ps.sig.to);
       if(to){ const q = poses.get(to.id), qs = toScreen(q.x, q.y); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(qs.x,qs.y); ctx.stroke(); ctx.setLineDash([]);
         ctx.beginPath(); ctx.arc(qs.x, qs.y, R0*1.9, 0, 7); ctx.stroke(); }
-      pill(s.x, s.y - R0*2.4, (ps.sig.txt || SIGS[ps.sig.s] || 'Signal').toUpperCase() + (to ? ' → ' + (to.l ? '#'+to.l : KIND[to.k]) : ''), col, '#ffffff'); }
+      pill(s.x, s.y - R0*2.4, (ps.sig.txt || SIG_LABEL[ps.sig.s] || 'Signal').toUpperCase() + (to ? ' → ' + (to.l ? '#'+to.l : KIND[to.k]) : ''), col, '#ffffff'); }
     const sc0 = SC2.map.get(it.id);
     if(sc0) for(const f of sc0.fired) if(TIME >= f.t && TIME < f.t + 1.6) pill(s.x, s.y - R0*(ps.sig?3.8:2.4), '🔓 GATE OPEN: ' + f.name.toUpperCase(), C.accent, tok('--accent-ink'));
     if(sc0 && sc0.stuck && TIME >= sc0.end - 0.001) pill(s.x, s.y + R0*2.6, '🔒 waits for ' + sc0.stuck, C.hostile, '#ffffff');
@@ -1828,7 +1864,9 @@ function actTag(a){
     case 'open': return '🔓 '+a.name;
     case 'gate': return '🔒 '+a.name;
     case 'sync': return 'SYNC '+a.c;
-    case 'bang': return '💥 BANG ' + (+a.fuse||1.5).toFixed(1) + 's';
+    case 'bang': return '💥 ' + (a.hook ? 'HOOK ' : '') + 'BANG ' + (+a.fuse||1.5).toFixed(1) + 's';
+    case 'bcall': { const to = a.to && getItem(a.to); return '✊ BANG CALL' + (to ? ' → ' + tagOf(to) : ''); }
+    case 'btake': { const fr = a.from && getItem(a.from); return '✋ TAKES CALL' + (fr ? ' ← ' + tagOf(fr) : ''); }
     case 'wbang': { const w = a.by && getItem(a.by); return 'MOVE ON BANG' + (w ? ' ('+tagOf(w)+')' : '') + (a.d ? ' ' + (a.d>0?'+':'') + (+a.d).toFixed(1) : ''); }
     case 'wdoor': return 'WAIT DOOR ' + (a.at==='start' ? 'OPENING' : 'HALF OPEN');
     case 'wloc': { const w = a.who && getItem(a.who); return 'WHEN ' + (w ? tagOf(w) : '?') + ' HITS ⌖' + (a.d ? ' ' + (a.d>0?'+':'') + (+a.d).toFixed(1) : ''); }
@@ -2209,9 +2247,14 @@ function actsEditor(it, owner, oi){
     else if(a.k==='open' || a.k==='gate') body = `<input type="text" data-af="n" data-ai="${ai}" id="af-n-${ai}" list="gate-names" maxlength="24" value="${esc(a.name)}" aria-label="Gate name"><span class="small">${a.k==='open' ? 'lets anyone waiting on it go' : 'holds here until someone opens it'}</span>`;
     else if(a.k==='bang'){ const bArm = lookArm && !lookArm.door && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
       const bp = bangPaths().find(p => p.by===it.id && Math.abs(p.tx-a.x)<1e-6 && Math.abs(p.ty-a.y)<1e-6);
-      body = `<button class="btn sm ${bArm?'on':''}" data-act="a-look" data-ai="${ai}">${bArm ? 'Tap where it lands…' : 'Move landing spot'}</button><span class="small">fuse</span>${stepA('a-fuse', ai, a.fuse||1.5, 's')}
+      body = `${segA('a-hook', ai, [[1,'Hook'],[0,'Overhand']], a.hook?1:0)}<button class="btn sm ${bArm?'on':''}" data-act="a-look" data-ai="${ai}">${bArm ? 'Tap where it lands…' : 'Move landing spot'}</button><span class="small">fuse</span>${stepA('a-fuse', ai, a.fuse||1.5, 's')}
         ${bp ? `<span class="small">${(Math.hypot(a.x-(oi<0?it.x:owner.x), a.y-(oi<0?it.y:owner.y))*FT).toFixed(0)} ft throw · goes off at ${bp.det.toFixed(1)} s</span>` : ''}
         ${bp && bp.blocked ? '<span class="small" style="color:var(--hostile)">Something is in the way: it hits it and drops short.</span>' : ''}`; }
+    else if(a.k==='bcall') body = `<select data-af="to" data-ai="${ai}" id="af-bc-${ai}" aria-label="Who takes the call"><option value="">nobody (not in a stack)</option>${others.map(q => `<option value="${q.id}" ${a.to===q.id?'selected':''}>to ${esc(tagOf(q))}</option>`).join('')}</select>
+      <span class="small">${a.to ? 'arm up, fist pumps three times, then the fist stays up until he puts his hand on it' : 'arm up, fist pumps three times, hand back on the rifle'}</span>`;
+    else if(a.k==='btake') body = `<select data-af="from" data-ai="${ai}" id="af-bt-${ai}" aria-label="Whose call"><option value="">from anyone</option>${others.map(q => `<option value="${q.id}" ${a.from===q.id?'selected':''}>from ${esc(tagOf(q))}</option>`).join('')}</select>
+      ${segA('a-how', ai, [['hand','Hand on his fist'],['nod','Nod']], a.how==='nod' ? 'nod' : 'hand')}
+      <span class="small">waits for the call, ${a.how==='nod' ? 'nods to say he has it' : 'puts his hand on the fist (signal received)'}, then gets the bang out. Follow with “Throw flashbang”.</span>`;
     else if(a.k==='wbang') body = `<select data-af="by" data-ai="${ai}" id="af-by-${ai}" aria-label="Whose bang"><option value="">anyone’s bang</option>${others.map(q => `<option value="${q.id}" ${a.by===q.id?'selected':''}>${esc(tagOf(q))}’s bang</option>`).join('')}</select>
       ${stepA('a-off', ai, a.d||0, 's')}<span class="small">${(a.d||0) < 0 ? 'before it goes off' : (a.d||0) > 0 ? 'after it goes off' : 'right as it goes off'}</span>`;
     else if(a.k==='wdoor'){ const ok = a.key && S.edges.get(a.key) && S.edges.get(a.key).t==='d', dArm = lookArm && lookArm.door && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
@@ -2435,7 +2478,13 @@ function actClick(act, v, ai){
     else if(v==='sig'){ const others = S.items.filter(q => isPerson(q) && q!==it && q.k===it.k); let best = null, bd = 1e9;
       for(const q of others){ const d = Math.hypot(q.x-it.x, q.y-it.y); if(d<bd){ bd=d; best=q; } }
       a = {k:'sig', s:'nod', to:best?best.id:null, d:0.8, txt:''}; }
-    else if(v==='bang'){ a = {k:'bang', x:snap(here.x + Math.cos(rad(here.r))*3,1/6), y:snap(here.y + Math.sin(rad(here.r))*3,1/6), fuse:1.5}; }
+    else if(v==='bang'){ a = {k:'bang', x:snap(here.x + Math.cos(rad(here.r))*3,1/6), y:snap(here.y + Math.sin(rad(here.r))*3,1/6), fuse:1.5, hook:1}; }
+    else if(v==='bcall' || v==='btake'){ const others = S.items.filter(q => isPerson(q) && q!==it && q.k===it.k); let best = null, bd = 1e9;
+      // the man right behind him takes the call; the man right in front makes it
+      const fwd = {x:Math.cos(rad(here.r)), y:Math.sin(rad(here.r))};
+      for(const q of others){ const qp = poseAt(q, 1e9), dx = qp.x-here.x, dy = qp.y-here.y, d = Math.hypot(dx, dy), ahead = dx*fwd.x + dy*fwd.y > 0;
+        if(d < 2.5 && (v==='bcall' ? !ahead : ahead) && d < bd){ bd = d; best = q; } }
+      a = v==='bcall' ? {k:'bcall', to:best ? best.id : null} : {k:'btake', from:best ? best.id : ''}; }
     else if(v==='wbang'){ const thr = S.items.find(q => isPerson(q) && q!==it && [q.acts, ...(q.path||[]).map(w => w.acts)].some(l => (l||[]).some(x => x.k==='bang')));
       a = {k:'wbang', by:thr ? thr.id : '', d:-0.5}; }
     else if(v==='wdoor'){ let best = null, bd = 1e9; for(const [k,e] of S.edges){ if(e.t!=='d') continue; const c = doorCenter(k), dd = Math.hypot(c.x-here.x, c.y-here.y); if(dd < bd){ bd = dd; best = k; } }
@@ -2467,6 +2516,7 @@ function actClick(act, v, ai){
     else if(act==='a-how') a.how = v;
     else if(act==='a-sweep') a.sw = +v;
     else if(act==='a-at') a.at = v;
+    else if(act==='a-hook') a.hook = +v;
     else if(act==='a-fuse') a.fuse = clamp(r2((a.fuse||1.5) + (+v)), 0.5, 5);
     else if(act==='a-off') a.d = clamp(r2((a.d||0) + (+v)), a.k==='wloc' ? -10 : -3, 5);
   }
@@ -2770,7 +2820,7 @@ function animateActions(p, ps, byId, now){
     let hip, knee; if(f < 0.35){ const u = easeIO(f/0.35); hip = 1.0*u; knee = -1.5*u; } else if(f < 0.55){ const u = easeIO((f-0.35)/0.2); hip = 1.0 + 0.45*u; knee = -1.5 + 1.5*u; } else { const u = easeIO((f-0.55)/0.45); hip = 1.45*(1-u); knee = 0; }
     p.R.hip.rotation.z = hip; p.R.knee.rotation.z = knee; B.rotation.z = -0.12*Math.sin(Math.PI*f); } else B.rotation.z = p.lean || 0;
   if(!p.armL) return busy;
-  const A = p.armL; p.g.updateMatrixWorld(true);
+  const A = p.armL; p.g.updateMatrixWorld(true); A.hand.scale.setScalar(1);
   const shoulder = V3(0, 4.62, -0.48);
   const rest = B.worldToLocal(p.pivot.localToWorld(A.hg.clone()));
   let target = rest, w = 0;
@@ -2790,6 +2840,19 @@ function animateActions(p, ps, byId, now){
       const kx = s.hx+(s.ex-s.hx)*0.84, ky = s.hy+(s.ey-s.hy)*0.84, nx = -(s.ey-s.hy), ny = s.ex-s.hx, n = Math.hypot(nx,ny)||1;
       const k1 = B.worldToLocal(V3((kx+nx/n*0.06)*FT, 3, (ky+ny/n*0.06)*FT)), k2 = B.worldToLocal(V3((kx-nx/n*0.06)*FT, 3, (ky-ny/n*0.06)*FT));
       target = k1.distanceTo(shoulder) < k2.distanceTo(shoulder) ? k1 : k2; w = clamp(Math.min((TIME - sig.t0)/0.3, (sig.t1 - TIME)/0.25), 0, 1); busy = true; }
+    else if(sig.s==='bcall'){ busy = true;   // flashbang call: arm straight up, fist opens and closes three times
+      const pump = Math.abs(Math.sin(Math.PI*3*f)); target = V3(-0.05, 6.1 + 0.12*pump, -0.45); A.hand.scale.setScalar(1 + 0.5*pump);
+      w = sig.to ? clamp((TIME - sig.t0)/0.25, 0, 1) : sigBlend(sig, TIME, 0.25, 0.25); }   // in a stack the fist stays up
+    else if(sig.s==='fist'){ busy = true; target = V3(-0.05, 6.1, -0.45); w = clamp((sig.t1 - TIME)/0.2, 0, 1); }
+    else if(sig.s==='bgot' && sig.to && byId[sig.to]){ const q = byId[sig.to]; q.g.updateMatrixWorld(true);   // signal received: his hand on the caller's fist
+      target = B.worldToLocal(q.body.localToWorld(V3(-0.05, 6.05, -0.45))); w = sigBlend(sig, TIME, 0.25, 0.15); busy = true; }
+    else if(sig.s==='bprep'){ busy = true;   // bang off his kit and up to his chest, ready to throw
+      const pouch = V3(0.45, 3.75, -0.3), chest = V3(0.7, 4.55, -0.25);
+      target = f < 0.45 ? rest.clone().lerp(pouch, easeIO(f/0.45)) : pouch.clone().lerp(chest, easeIO((f-0.45)/0.55)); w = 1; }
+    else if(sig.s==='bang' && sig.hook){ busy = true;   // hook: low swing from his hip, round the door frame
+      const chest = V3(0.7, 4.55, -0.25), back = V3(-0.2, 3.9, -0.8), fwd = V3(1.45, 4.35, -0.1);
+      if(f < 0.5) target = chest.clone().lerp(back, easeIO(f/0.5)); else if(f < 0.72) target = back.clone().lerp(fwd, easeIO((f-0.5)/0.22)); else target = fwd.clone().lerp(rest, easeIO((f-0.72)/0.28));
+      w = 1; }
     else if(sig.s==='bang'){ busy = true;
       const back = V3(-0.35, 5.45, -0.35), fwd = V3(1.7, 5.9, -0.35);
       if(f < 0.55) target = rest.clone().lerp(back, easeIO(f/0.55)); else if(f < 0.75) target = back.clone().lerp(fwd, easeIO((f-0.55)/0.2)); else target = fwd.clone().lerp(rest, easeIO((f-0.75)/0.25));
@@ -2956,7 +3019,7 @@ function updateDyn(dt){
     { const fl0 = p.pivot ? flaggingWho(p.it, ps, TIME, q => poseAt(q, TIME)) : false, sg0 = sigGun(ps.sig); p.gstate = !p.pivot ? 2 : (sg0===1 || sg0===0) ? sg0 : fl0 ? 1 : sg0===3 ? 3 : ps.g; }
     poseFigure(p, ps, p.gstate); if(ps.moving) busy = busy || playing;
     p.fan.visible = conesOn; if(T.routes) T.routes.visible = routesOn;
-    const st = ps.sig ? (ps.sig.txt || SIGS[ps.sig.s] || 'Signal') + (ps.sig.to && getItem(ps.sig.to) ? ' → ' + tagOf(getItem(ps.sig.to)) : '') : '';
+    const st = ps.sig ? (ps.sig.txt || SIG_LABEL[ps.sig.s] || 'Signal') + (ps.sig.to && getItem(ps.sig.to) ? ' → ' + tagOf(getItem(ps.sig.to)) : '') : '';
     if(st !== p.sigText){ if(p.sigSp){ T.root.remove(p.sigSp); p.sigSp.material.map.dispose(); p.sigSp.material.dispose(); p.sigSp = null; }
       p.sigText = st; if(st){ p.sigSp = textSprite(st, '#ffffff', p.col); p.sigSp.scale.multiplyScalar(0.9); T.root.add(p.sigSp); } }
     if(p.sigSp) p.sigSp.position.set(ps.x*FT, (p.it.p?5.6:7.3) + 1.3, ps.y*FT);
@@ -2984,6 +3047,11 @@ function updateDyn(dt){
   { const byId = {}; for(const p of T.people) byId[p.it.id] = p; for(const p of T.people){ const ps = poseAt(p.it, TIME); if(animateActions(p, ps, byId, now)) busy = true; } }
   // last check, on the finished pose (lean, actions and all): if any part of the rifle still touches a surface, tip it further
   { const byId = {}; for(const p of T.people) byId[p.it.id] = p; for(const p of T.people) if(p.pivot && p.gstate!==3) gunUnclip(p, byId, now); }
+  // the bang is in his hand from when he takes it off his kit until it leaves his hand
+  for(const bb of (T.bangs||[])){ const p = bb.p; if(TIME >= p.t0 || p.t0 - TIME > 3) continue;
+    const tp = T.people.find(q => q.it.id===p.by); if(!tp || !tp.armL) continue; const sg = poseAt(tp.it, TIME).sig;
+    if(!sg || !(sg.s==='bprep' || sg.s==='bang')) continue;
+    tp.armL.hand.getWorldPosition(bb.can.position); bb.can.visible = true; bb.can.rotation.z = 0.5; }
   const lp = losId && getItem(losId);
   const key = [TIME.toFixed(2), losId, threatOn, ver].join('|');
   if(key !== T.dynKey){ T.dynKey = key; disposeTree(T.dyn); const C = T.colors;
@@ -4302,9 +4370,9 @@ const buttonHook = (it, from) => entryMove(it, from, 'hook');
 /* ---- zipper: the whole stack through one doorway ---- */
 const ZIP_TEMPO = {d:['Deliberate', 4], s:['Steady', 5.5], x:['Dynamic', 7]};   // name, walking speed ft/s
 const ZIP_GAPS = [0.25, 0.35, 0.5];   // seconds between one man crossing the door line and the next
-let zip = {pattern:'zip', first:'hook', tempo:'s', gap:0.25, sectors:true, tighten:true, ids:[], from:null, custom:{}};
+let zip = {pattern:'zip', first:'hook', tempo:'s', gap:0.25, sectors:true, tighten:true, bang:false, ids:[], from:null, custom:{}};
 const ZIP_PATTERNS = {zip:'Zipper', hook:'All hook', cross:'All cross', custom:'Pick sides'};
-try{ const v = JSON.parse(localStorage.getItem('cqb-zip') || 'null'); if(v){ zip.first = v.first==='cross' ? 'cross' : 'hook'; if(ZIP_PATTERNS[v.pattern]) zip.pattern = v.pattern; zip.tempo = ZIP_TEMPO[v.tempo] ? v.tempo : 's'; zip.sectors = v.sectors !== false; zip.tighten = v.tighten !== false; if(ZIP_GAPS.includes(v.gap)) zip.gap = v.gap; } }catch(e){}
+try{ const v = JSON.parse(localStorage.getItem('cqb-zip') || 'null'); if(v){ zip.first = v.first==='cross' ? 'cross' : 'hook'; if(ZIP_PATTERNS[v.pattern]) zip.pattern = v.pattern; zip.tempo = ZIP_TEMPO[v.tempo] ? v.tempo : 's'; zip.sectors = v.sectors !== false; zip.tighten = v.tighten !== false; zip.bang = !!v.bang; if(ZIP_GAPS.includes(v.gap)) zip.gap = v.gap; } }catch(e){}
 const tagNum = q => { const n = parseInt(q.l, 10); return isNaN(n) ? 99 : n; };
 // the last waypoint he reaches before the doorway (-1 = his start), on the given side of the door line
 function outsideIndex(q, o, side){
@@ -4342,7 +4410,7 @@ function renderZipper(){
   $('#zip-pat-help').textContent = {zip:'Each man goes the opposite way to the man in front of him.', hook:'Everyone button hooks to his own side of the door.', cross:'Everyone crosses to the far side of the door.', custom:'Pick left or right for each man. Hook or cross follows from where he stands.'}[zip.pattern];
   document.querySelectorAll('#zipper [data-zfirst]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.zfirst===zip.first)));
   document.querySelectorAll('#zipper [data-ztempo]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.ztempo===zip.tempo)));
-  $('#zip-sectors').checked = zip.sectors; $('#zip-tighten').checked = zip.tighten;
+  $('#zip-sectors').checked = zip.sectors; $('#zip-tighten').checked = zip.tighten; $('#zip-bang').checked = zip.bang;
   document.querySelectorAll('#zipper [data-zgap]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.zgap===zip.gap)));
   $('#zip-tempo-help').textContent = `Moving at ${ZIP_TEMPO[zip.tempo][1]} ft/s, one man through the door every ${zip.gap} s. If two would touch, the second goes a hair later.`;
 }
@@ -4412,6 +4480,37 @@ function buildZipper(){
   });
   if(lastClosed){ const m0 = plan[0].m, own0 = m0.i >= 0 ? m0.q.path[m0.i] : m0.q;
     own0.acts = (own0.acts || []).filter(a => !(a.k==='wloc' && a.zipStack)); own0.acts.push({k:'wloc', who:lastClosed.q.id, seg:lastClosed.leg, f:1, d:0.2, set:1, zipStack:1}); }
+  // flashbang first: #1 calls it (fist pumps), #2 puts his hand on #1's fist, gets the bang out, steps off the wall
+  // (staying on his side, out of the doorway) and hooks it in. #1 goes on the bang; everyone else flows on the usual rhythm.
+  if(zip.bang && plan.length >= 2){
+    const c = plan[0], cl = latOf(spotOf(c.m)), same = plan.slice(1).find(pl => latOf(spotOf(pl.m))===cl), b = same || plan[1];
+    const cq = c.m.q, bq = b.m.q, bs = spotOf(b.m), bl = latOf(bs);
+    // his throwing spot: one or two steps (2.6 ft at most) off the wall, never inside the bubble of the man in front
+    // (2 ft), and far enough out that the throw goes past him, not across him; still on his side, out of the doorway
+    const front = plan.filter(pl => pl!==b && latOf(spotOf(pl.m))===bl && plan.indexOf(pl) < plan.indexOf(b)).map(pl => spotOf(pl.m));
+    const mates = plan.filter(pl => pl!==b).map(pl => spotOf(pl.m));
+    const door = F.P(F.mid, o.line), bu0 = uOf(bs), bv0 = vOfP(bs), BUB = 2/FT, LANE = 0.6/FT, MAXSTEP = 2.6/FT;
+    let step = null, bestCost = 1e9;
+    for(let out = -0.3; out <= 0.9 + 1e-9; out += 0.05) for(let back = 0; back <= 0.6 + 1e-9; back += 0.05){
+      const cu = bu0 + bl*back, cv = bv0 + side*out, cand = F.P(cu, cv), travel = Math.hypot(back, out);
+      if(travel < 0.15) continue;
+      if(travel > MAXSTEP) continue;
+      if(bl < 0 ? cu > o.a0 - 0.35 : cu < o.a1 + 0.35) continue;
+      if((cv - o.line)*side < 0.25) continue;   // stays on the hall side of the wall line
+      if(mates.some(f => Math.hypot(f.x - cand.x, f.y - cand.y) < BUB)) continue;
+      if(front.some(f => distSeg(f.x, f.y, cand.x, cand.y, door.x, door.y) < LANE)) continue;
+      if(!wallClear(bs.x, bs.y, cand.x, cand.y)) continue;
+      const cost = travel + back*0.5; if(cost < bestCost){ bestCost = cost; step = cand; } }
+    // no room for a step that keeps clear of everyone: he throws from where he stands
+    const lineOwner = b.m.i >= 0 ? bq.path[b.m.i] : bq;
+    lineOwner.acts = (lineOwner.acts || []).filter(a => a.k!=='btake'); lineOwner.acts.push({k:'btake', from:cq.id, how:same ? 'hand' : 'nod'});
+    const tgt = F.P(F.mid - bl*0.35, o.line - side*clamp(F.depth*0.5, 1.2, 2.6)), bang = {k:'bang', x:r2(tgt.x), y:r2(tgt.y), fuse:1.5, hook:1};
+    if(step){ if(!bq.path) bq.path = [];
+      bq.path.splice(b.m.i + 1, 0, {x:r2(step.x), y:r2(step.y), sp:3, w:0, go:'', g:null, lx:r2(doorLook.x), ly:r2(doorLook.y), acts:[bang]}); b.m.i += 1; }
+    else lineOwner.acts.push(bang);
+    const own0 = c.m.i >= 0 ? cq.path[c.m.i] : cq;
+    own0.acts = (own0.acts || []).filter(a => !['bcall','wbang'].includes(a.k)); own0.acts.push({k:'bcall', to:bq.id}, {k:'wbang', by:bq.id, d:0});
+  }
   let prev = null;
   plan.forEach((pl, k) => {
     const q = pl.m.q, from = pl.m.i;
@@ -4475,7 +4574,7 @@ function buildZipper(){
   plan.forEach(pl => { const q = pl.m.q, own = pl.m.i >= 0 ? q.path[pl.m.i] : q;
     own.acts = (own.acts || []).filter((a, i, l) => !(a.k==='gun' && (a.zipGun || (a.g===2 && i===l.length - 1)))); own.acts.push({k:'gun', g:2, zipGun:1}); });
   changed();
-  try{ localStorage.setItem('cqb-zip', JSON.stringify({pattern:zip.pattern, first:zip.first, tempo:zip.tempo, gap:zip.gap, sectors:zip.sectors, tighten:zip.tighten})); }catch(e){}
+  try{ localStorage.setItem('cqb-zip', JSON.stringify({pattern:zip.pattern, first:zip.first, tempo:zip.tempo, gap:zip.gap, sectors:zip.sectors, tighten:zip.tighten, bang:zip.bang})); }catch(e){}
   $('#zipper').hidden = true; sel = {type:'item', id:it.id}; changed(); renderInspector(); setTime(0);
   toast(`${ZIP_PATTERNS[zip.pattern]==='Pick sides' ? 'Team entry' : ZIP_PATTERNS[zip.pattern]} built for ${men.length} men · press play. Undo puts their old moves back`);
 }
@@ -4490,7 +4589,8 @@ $('#zipper').addEventListener('click', e => { const b = e.target.closest('button
   if(b.id==='zip-build') buildZipper(); });
 $('#zipper').addEventListener('change', e => { const c = e.target.closest('[data-zid]'); if(c){ const id = c.dataset.zid; zip.ids = c.checked ? [...new Set(zip.ids.concat(id))] : zip.ids.filter(x => x!==id); renderZipper(); }
   if(e.target.id==='zip-sectors'){ zip.sectors = e.target.checked; }
-  if(e.target.id==='zip-tighten'){ zip.tighten = e.target.checked; } });
+  if(e.target.id==='zip-tighten'){ zip.tighten = e.target.checked; }
+  if(e.target.id==='zip-bang'){ zip.bang = e.target.checked; } });
 /* ---------------- movable panels ----------------
    The selection panel and the object picker can be dragged anywhere on the plan by their grip (the bar along the top)
    or, with a mouse, by any empty part of the panel. The spot is remembered on this device. Double-click the grip to
