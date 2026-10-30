@@ -350,6 +350,7 @@ button.chip.cones[aria-pressed="true"]{background:var(--ink);border-color:var(--
       <button class="chip cones" id="btn-routes" aria-pressed="true" title="Show or hide routes, waypoints and look lines">Routes</button>
       <button class="chip cones" id="btn-cones" aria-pressed="true" title="Show where each person is looking">View cones</button>
       <button class="chip" id="btn-threat" aria-pressed="false" title="Shade what every hostile can see">Threat view</button>
+      <button class="chip cones" id="btn-past" aria-pressed="true" title="Show or hide the parts of routes already walked by this point in the timeline">Past routes</button>
       <button class="chip" id="btn-dead" aria-pressed="true" title="Shade floor no friendly has looked at yet">Dead space</button>
       <button class="chip" id="btn-deadfix" hidden title="Add moves so a friendly looks into each patch of dead space">Clear dead space</button>
       <button class="chip cam" id="btn-camkey" hidden title="Save what the camera shows now as a key at this time">＋ Camera key</button>
@@ -669,10 +670,10 @@ const GO = ['A','B','C'];
 const SIGS = {nod:'Nod', tri:'Tricep squeeze', sho:'Shoulder squeeze', thumb:'Thumbs up', point:'Point', call:'Verbal call', wig:'Gun wiggle', hr:'High ready', lr:'Low ready'};
 // gun posture shown for a moment by a signal: high ready, low ready, or the wiggle
 // what a signal looks like on the plan (the hand signals above plus the flashbang drill's own gestures)
-const SIG_LABEL = {...SIGS, clear:'Clear!', bcall:'Bang call', fist:'Fist up · waiting', bgot:'Signal received', bprep:'Prepping bang', bang:'Bang out'};
+const SIG_LABEL = {...SIGS, secure:'Secure! Moving out', bwin:'Breaks the window', charge:'Sets the charge', clear:'Clear!', bcall:'Bang call', fist:'Fist up · waiting', bgot:'Signal received', bprep:'Prepping bang', bang:'Bang out'};
 const BCALL = {pump:1.5, got:0.6, prep:0.9};   // fist pumps x3; hand on his fist; bang off the kit and ready
-const sigGun = sig => !sig ? null : sig.s==='hr' ? 1 : sig.s==='lr' ? 0 : sig.s==='wig' ? 3 : null;
-const ACT_NAMES = {look:'Look at', gun:'Gun', wait:'Wait', door:'Open door', wdoor:'Wait for door', mwith:'Move with', wloc:'Move when he reaches…', clear:'Call clear', bcall:'Call for a bang', btake:'Take the bang call', bang:'Throw flashbang', wbang:'Move on bang', sig:'Signal', wsig:'Wait for signal', open:'Open gate', gate:'Wait for gate', sync:'Sync'};
+const sigGun = sig => !sig ? null : sig.s==='hr' ? 1 : sig.s==='lr' || sig.s==='bwin' || sig.s==='charge' ? 0 : sig.s==='wig' ? 3 : null;
+const ACT_NAMES = {look:'Look at', gun:'Gun', wait:'Wait', door:'Open door', wdoor:'Wait for door', mwith:'Move with', wloc:'Move when he reaches…', bwin:'Break window', breach:'Explosive breach', wbreach:'Wait for breach', wsec:'Wait for all detained', clear:'Call clear', bcall:'Call for a bang', btake:'Take the bang call', bang:'Throw flashbang', wbang:'Move on bang', sig:'Signal', wsig:'Wait for signal', open:'Open gate', gate:'Wait for gate', sync:'Sync'};
 const CONE_DEG = 100, CONE_LEN = 7;          // view cone width and reach (squares)
 
 const ICON = {
@@ -702,7 +703,7 @@ const HINTS = {
   wall:'Drag along a grid line to draw a wall',
   door:'Tap a wall to add a door · tap the door again to change its swing',
   opening:'Tap a wall to cut an open doorway',
-  window:'Tap a wall to add a window (you can see through it)',
+  window:'Tap a wall to add a window (you can see and shoot through it) · tap a window again to break it out',
   erase:'Tap or drag over anything to remove it',
   object:'Tap the plan to place it',
   f:'Tap to place · drag the dot to set facing',
@@ -718,6 +719,7 @@ const HINTS = {
 let uid = 1;
 const newId = () => 'i' + (uid++);
 function blank(){ return {title:'Untitled scenario', notes:'', flagRule:true, cols:24, rows:16, edges:new Map(), items:[], arrows:[], steps:[], cam:[], drone:{who:'', h:14, d:12}}; }
+let pastOff = false;   // "Past routes" off: legs already walked by the time on the timeline aren't drawn
 let S = blank(), ver = 0, sel = null, tool = 'select', furnKind = 'couch', losId = null, threatOn = false, conesOn = true, routesOn = true, mode = 'plan';
 let READONLY = false, shareRO = true;   // view-only scenario / what the next save produces
 let TIME = 0, playing = false, speed = 1, pausedStep = null, lookArm = null;
@@ -771,9 +773,13 @@ function packActs(acts){
       case 'sync': return ['y', a.c||'A'];
       case 'door': return ['d', a.key||'', a.how||'hand', a.name||''];
       case 'wdoor': return ['D', a.key||'', a.at||'half'];
-      case 'bang': return ['b', r2(a.x), r2(a.y), r2(a.fuse||1.5), a.hook?1:0];
+      case 'bang': return ['b', r2(a.x), r2(a.y), r2(a.fuse||1.5), a.hook?1:0, a.n===1 ? 1 : 9];
       case 'bcall': return ['C', a.to ? S.items.findIndex(i => i.id===a.to) : -1];
       case 'clear': return ['Z'];
+      case 'bwin': return ['X', a.key||''];
+      case 'breach': return ['B', a.key||'', r2(a.d==null ? 3 : a.d)];
+      case 'wbreach': return ['V', a.by ? S.items.findIndex(i => i.id===a.by) : -1, r2(a.d||0)];
+      case 'wsec': return ['Q', r2(a.d||0)];
       case 'btake': return ['T', a.from ? S.items.findIndex(i => i.id===a.from) : -1, a.how==='nod' ? 'nod' : 'hand'];
       case 'wbang': return ['W', a.by ? S.items.findIndex(i => i.id===a.by) : -1, r2(a.d||0)];
       case 'wloc': return ['L', a.who ? S.items.findIndex(i => i.id===a.who) : -1, a.seg|0, r2(a.f||0), r2(a.d||0), a.set?1:0];
@@ -809,9 +815,13 @@ function unpackActs(arr, num){
       case 'l': out.push({k:'look', x:num(q[1],0), y:num(q[2],0), d:clamp(num(q[3],0),0,600), sw:clamp(q[4]|0,0,5)}); break;
       case 'g': out.push({k:'gun', g:clamp(q[1]|0,0,3)}); break;
       case 'w': out.push({k:'wait', d:clamp(num(q[1],0),0,600)}); break;
-      case 'b': out.push({k:'bang', x:num(q[1],0), y:num(q[2],0), fuse:clamp(num(q[3],1.5),0.5,5), hook:q[4]?1:0}); break;
+      case 'b': out.push({k:'bang', x:num(q[1],0), y:num(q[2],0), fuse:clamp(num(q[3],1.5),0.5,5), hook:q[4]?1:0, n:(q[5]|0)===1 ? 1 : 9}); break;
       case 'C': out.push({k:'bcall', toIdx:q[1]|0}); break;
       case 'Z': out.push({k:'clear'}); break;
+      case 'X': out.push({k:'bwin', key:String(q[1]||'')}); break;
+      case 'B': out.push({k:'breach', key:String(q[1]||''), d:clamp(num(q[2],3),0.5,30)}); break;
+      case 'V': out.push({k:'wbreach', byIdx:q[1]|0, d:clamp(num(q[2],0),-3,10)}); break;
+      case 'Q': out.push({k:'wsec', d:clamp(num(q[1],0),0,30)}); break;
       case 'T': out.push({k:'btake', fromIdx:q[1]|0, how:q[2]==='nod' ? 'nod' : 'hand'}); break;
       case 'W': out.push({k:'wbang', byIdx:q[1]|0, d:clamp(num(q[2],0),-3,5)}); break;
       case 'D': out.push({k:'wdoor', key:String(q[1]||''), at:q[2]==='start'?'start':'half'}); break;
@@ -877,7 +887,7 @@ function fromData(d){
     }
     s.items.push(o); });
   // signal targets were saved by position in the list
-  const fix = acts => { if(acts) for(const a of acts){ if(a.k==='sig' || a.k==='bcall'){ a.to = idxToId.get(a.toIdx) || null; delete a.toIdx; } if(a.k==='wsig' || a.k==='btake'){ a.from = idxToId.get(a.fromIdx) || ''; delete a.fromIdx; } if(a.k==='mwith' || a.k==='wloc'){ a.who = idxToId.get(a.whoIdx) || ''; delete a.whoIdx; } if(a.k==='wbang'){ a.by = a.byIdx>=0 ? (idxToId.get(a.byIdx) || '') : ''; delete a.byIdx; } } };
+  const fix = acts => { if(acts) for(const a of acts){ if(a.k==='sig' || a.k==='bcall'){ a.to = idxToId.get(a.toIdx) || null; delete a.toIdx; } if(a.k==='wsig' || a.k==='btake'){ a.from = idxToId.get(a.fromIdx) || ''; delete a.fromIdx; } if(a.k==='mwith' || a.k==='wloc'){ a.who = idxToId.get(a.whoIdx) || ''; delete a.whoIdx; } if(a.k==='wbang' || a.k==='wbreach'){ a.by = a.byIdx>=0 ? (idxToId.get(a.byIdx) || '') : ''; delete a.byIdx; } } };
   for(const it of s.items){ fix(it.acts); if(it.path) it.path.forEach(w => fix(w.acts)); }
   for(const a of (d.a||[])){ if(!Array.isArray(a)) continue;
     s.arrows.push({id:newId(), x1:num(a[0],0), y1:num(a[1],0), x2:num(a[2],0), y2:num(a[3],0), c:clamp(a[4]|0,0,2)}); }
@@ -1078,7 +1088,14 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
       else if(a.k==='gate'){ const rt = gates[a.name]; if(rt==null){ stuck = `gate “${a.name}”, but nobody opens it`; return false; } hold(rt - t); }
       else if(a.k==='bang'){ const tgt = {x:a.x, y:a.y}, turn = turnTime(r, angTo(x,y,tgt)); look = tgt;
         const t0 = t + turn + BANG.windup; sigs.push({t0:t, t1:t0 + 0.3, s:'bang', txt:'Bang out', tx:a.x, ty:a.y, hook:!!a.hook});
-        bangs.push({by:it.id, t0, x0:x, y0:y, tx:a.x, ty:a.y, fuse:a.fuse||1.5, det:t0 + (a.fuse||1.5), hook:!!a.hook}); hold(turn + BANG.windup + 0.25); }
+        bangs.push({by:it.id, t0, x0:x, y0:y, tx:a.x, ty:a.y, fuse:a.fuse||1.5, det:t0 + (a.fuse||1.5), hook:!!a.hook, n:a.n===1 ? 1 : 9}); hold(turn + BANG.windup + 0.25); }
+      else if(a.k==='wsec'){   // holds until everyone in the room is down or cuffed, then calls it
+        if(secureHint==null){ stuck = 'every bad guy down and every civilian cuffed (give someone “Call clear” so the detaining starts)'; return false; }
+        hold(secureHint + (a.d||0) - t); sigs.push({t0:t, t1:t + 0.9, s:'secure'}); hold(0.9); }
+      else if(a.k==='wbreach'){   // holds until the breach charge goes off (offset can be negative to step off just before)
+        const got = (bangsPrev||[]).filter(q => q.breach && !used.has(q) && (!a.by || q.by===a.by)).sort((p,q) => p.det-q.det)[0];
+        if(!got){ const who = a.by && S.items.find(i => i.id===a.by); stuck = `a breach${who ? ' from '+tagOf(who) : ''}, but nobody sets one`; return false; }
+        used.add(got); hold(got.det + (a.d||0) - t); }
       else if(a.k==='wbang'){   // moves when the bang goes off (offset can be negative to step off just before)
         const got = (bangsPrev||[]).filter(q => !used.has(q) && (!a.by || q.by===a.by)).sort((p,q) => p.det-q.det)[0];
         if(!got){ const who = a.by && S.items.find(i => i.id===a.by); stuck = `a flashbang${who ? ' from '+tagOf(who) : ''}, but nobody throws one`; return false; }
@@ -1100,6 +1117,12 @@ function schedFor(it, rel, gates, arrive, opens, doorEv, recv, doorT, prev, bang
         const mv = m.ph.find(q => q.k==='m' && q.t1 > t + 0.02);
         if(!mv){ stuck = `${who ? tagOf(who) : 'his teammate'} to move, but he never moves again`; return false; }
         hold(Math.max(t, mv.t0) + (a.d||0) - t); }
+      else if(a.k==='bwin'){ const dc = doorCenter(a.key); if(!dc){ stuck = 'you to pick the window to break'; return false; }   // Halligan off his back, swing, glass out
+        look = dc; const t0 = t + turnTime(r, angTo(x,y,dc)); sigs.push({t0, t1:t0 + 1.6, s:'bwin', key:a.key, wx:dc.x, wy:dc.y, br:t0 + 0.95, txt:'Breaks the window'}); hold(t0 - t + 1.6); }
+      else if(a.k==='breach'){ const dc = doorCenter(a.key); if(!dc){ stuck = 'you to pick the door to breach'; return false; }   // sets the charge on the door
+        look = dc; const t0 = t + turnTime(r, angTo(x,y,dc)), placed = t0 + BREACH.place, det = placed + (a.d==null ? 3 : a.d);
+        sigs.push({t0, t1:placed, s:'charge', key:a.key, txt:'Sets the charge'});
+        bangs.push({by:it.id, t0:det, x0:dc.x, y0:dc.y, tx:dc.x, ty:dc.y, fuse:0, det, placeT:t0 + 1.0, breach:true, key:a.key}); hold(BREACH.place + (t0 - t)); }
       else if(a.k==='clear'){ sigs.push({t0:t, t1:t + 1.0, s:'clear'}); hold(1.0); }   // "Clear!": the room is done; detaining can start
       else if(a.k==='bcall'){   // flashbang call: arm up, opens and closes his fist three times
         const who = a.to && S.items.find(i => i.id===a.to);
@@ -1202,11 +1225,26 @@ function buildSched0(s){
     rel = nr; gates = opens; recv = nrecv; doorT = ndoorT; prev = map; prevMoves = moves; bangsPrev = bangs; if(same) break;
   }
   let end = 0; for(const v of map.values()) end = Math.max(end, v.end);
+  const winT = {}; for(const v of map.values()) for(const g of v.sigs) if(g.s==='bwin' && g.key && (winT[g.key]==null || g.br < winT[g.key])) winT[g.key] = g.br;
+  const breachT = {}; for(const b of bangs) if(b.breach && (breachT[b.key]==null || b.det < breachT[b.key])) breachT[b.key] = b.det;
   for(const b of bangs) end = Math.max(end, b.det + 1);
-  return {map, rel, gates, end, doorEv, bangs};
+  return {map, rel, gates, end, doorEv, bangs, winT, breachT};
 }
 let SC = null, SCver = -1;
-function sched(){ if(SCver !== ver || !SC){ SC = buildSched(S); SCver = ver; } return SC; }
+// "Wait for all detained" needs to know when the engagements are over, which depends on the plan itself: the plan is
+// worked out once without it, the engagements are played out, and then the plan is worked out again with that time.
+let secureHint = null;
+function sched(){
+  if(SCver !== ver || !SC){ secureHint = null; SC = buildSched(S); SCver = ver;
+    if(S.items.some(q => isPerson(q) && [q.acts, ...(q.path||[]).map(w => w.acts)].some(l => (l||[]).some(a => a.k==='wsec')))){
+      SIMver = -1; const M = runSim(), t = secureTime(M); SIMver = -1; FT_ = {ver:-1, m:new Map()}; BPver = -1; DSver = -1;
+      if(t!=null){ secureHint = t; SC = buildSched(S); SCver = ver; } } }
+  return SC; }
+// when every bad guy is down and every civilian is cuffed (or down); null if that never happens
+function secureTime(M){ let t = 0, any = false;
+  for(const q of S.items){ if(q.k==='h'){ any = true; const d = M.down.get(q.id); if(d==null) return null; t = Math.max(t, d); }
+    else if(q.k==='c'){ any = true; const dt = M.det.get(q.id), dn = M.down.get(q.id); const v = dn!=null ? dn : dt ? dt.tcuff : null; if(v==null) return null; t = Math.max(t, v); } }
+  return any ? t : null; }
 // every person's facing is turned at TURN_RATE at most, so nobody snaps around: worked out once per change at 60 fps
 let FT_ = {ver:-1, m:new Map()};
 function facingTrack(it){
@@ -1334,12 +1372,25 @@ function doorSig(){ let s = ''; for(const [k,e] of S.edges) if(e.t==='d') s += M
    The thrower turns to the landing spot, winds up for 0.4 s and throws. It flies in an arc (longer throws fly
    higher and take longer), stops at the first wall, closed door or tall object in the way, rolls a little, and
    goes off when its fuse runs out. Hostiles and civilians within 15 ft who can see it are stunned for 3 s. */
-const BANG = {windup:0.4, roll:0.35, stunR:5, stunT:3};
-function bangBlockers(t){
+const BANG = {windup:0.4, roll:0.35, stunR:5, stunT:3, gap:0.22};   // gap: time between reports of a 9-banger
+// a 9-banger goes off nine times in about two seconds: the stun runs from the first report to 3 s after the last.
+const reports = p => p.n > 1 ? p.n : 1, lastReport = p => p.det + (reports(p) - 1)*BANG.gap;
+// how long ago the most recent report went off (null before the first)
+function sinceReport(p, t){ if(t < p.det) return null; const k = Math.min(reports(p) - 1, Math.floor((t - p.det)/BANG.gap + 1e-9)); return t - (p.det + k*BANG.gap); }
+// explosive breach: he sets the charge on the door (1.5 s), backs off, and it goes off after the delay you set.
+// The door is blown off its hinges, and anyone (bad guy or civilian) within 12 ft who has line of sight is stunned.
+const BREACH = {place:1.5, stunR:4, stunT:3};
+function doorBlown(k, t){ const bt = sched().breachT && sched().breachT[k]; return bt!=null && t >= bt; }
+// windows: glass you can see and shoot through; a bang only goes through once it's broken (placed broken, or broken
+// by someone's "Break window" action). A broken window is marked with the swing bit (s & 1), which windows don't use.
+function windowBroken(k, t){ const e = S.edges.get(k); if(!e || e.t!=='n') return false; if(e.s & 1) return true; const bt = sched().winT[k]; return bt!=null && t >= bt; }
+// what stops things at time t: sight=true for seeing and shooting (glass doesn't stop either), otherwise for a thrown bang
+function bangBlockers(t, sight){
   const segs = [];
   for(const [k,e] of S.edges){ const [d,x,y] = parseKey(k);
-    if(e.t==='w' || e.t==='n') segs.push(edgePts(d,x,y));
-    else if(e.t==='d'){ const s = doorSlab(d,x,y,e,doorAngle(k,t)); segs.push([s.hx,s.hy,s.ex,s.ey]); } }
+    if(e.t==='w') segs.push(edgePts(d,x,y));
+    else if(e.t==='n'){ if(!sight && !windowBroken(k, t)) segs.push(edgePts(d,x,y)); }
+    else if(e.t==='d' && !doorBlown(k, t)){ const s = doorSlab(d,x,y,e,doorAngle(k,t)); segs.push([s.hx,s.hy,s.ex,s.ey]); } }
   for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h < 5) continue; const c = rectCorners(it); for(let i=0;i<4;i++){ const a=c[i], b=c[(i+1)%4]; segs.push([a[0],a[1],b[0],b[1]]); } }
   return segs;
 }
@@ -1355,16 +1406,17 @@ function bangPaths(){
   if(BP && BPver===ver) return BP;
   BP = []; BPver = ver;
   for(const b of sched().bangs){
+    if(b.breach){ BP.push({...b, lx:b.tx, ly:b.ty, rx:b.tx, ry:b.ty, flight:0, apex:0, blocked:false, stunR:BREACH.stunR}); continue; }
     const segs = bangBlockers(b.t0);
     // a hook throw from beside the door bends round the frame: it goes through the doorway on its way to the spot
     if(b.hook && firstHit(b.x0, b.y0, b.tx, b.ty, segs).hit){ let best = null;
-      for(const [k,e] of S.edges){ if(e.t!=='d' && e.t!=='o') continue; const c = doorCenter(k); if(Math.hypot(c.x-b.x0, c.y-b.y0) > 3.5) continue;
+      for(const [k,e] of S.edges){ if(e.t!=='d' && e.t!=='o' && !(e.t==='n' && windowBroken(k, b.t0))) continue; const c = doorCenter(k); if(Math.hypot(c.x-b.x0, c.y-b.y0) > 3.5) continue;
         if(firstHit(b.x0, b.y0, c.x, c.y, segs).hit || firstHit(c.x, c.y, b.tx, b.ty, segs).hit) continue;
         const L = Math.hypot(c.x-b.x0, c.y-b.y0) + Math.hypot(b.tx-c.x, b.ty-c.y); if(!best || L < best.L) best = {x:c.x, y:c.y, L}; }
       if(best){ const L1 = Math.hypot(best.x-b.x0, best.y-b.y0), R = best.L*FT, ux = (b.tx-best.x)/(Math.hypot(b.tx-best.x, b.ty-best.y)||1), uy = (b.ty-best.y)/(Math.hypot(b.tx-best.x, b.ty-best.y)||1);
         const lx = b.tx, ly = b.ty, r2x = lx + ux*0.35, r2y = ly + uy*0.35, rh = firstHit(lx, ly, r2x, r2y, segs);
         BP.push({...b, via:{x:best.x, y:best.y, f:L1/best.L}, lx, ly, rx:lx + (r2x-lx)*Math.max(0, rh.s-0.1), ry:ly + (r2y-ly)*Math.max(0, rh.s-0.1),
-          flight:clamp(0.3 + R*0.03, 0.35, 1.3), apex:clamp(R*0.08, 0.8, 3), blocked:false}); continue; } }
+          flight:clamp(0.3 + R*0.03, 0.35, 1.3), apex:clamp(R*0.08, 0.8, 3), blocked:false, stunR:BANG.stunR}); continue; } }
     const R = Math.hypot(b.tx-b.x0, b.ty-b.y0)*FT;
     const h = firstHit(b.x0, b.y0, b.tx, b.ty, segs);
     let lx = b.x0 + (b.tx-b.x0)*h.s, ly = b.y0 + (b.ty-b.y0)*h.s;
@@ -1374,12 +1426,13 @@ function bangPaths(){
     // roll a little further, unless a wall is right there
     const dir = h.hit ? -1 : 1, r2x = lx + ux*0.35*dir, r2y = ly + uy*0.35*dir, rh = firstHit(lx, ly, r2x, r2y, segs);
     const rx = lx + (r2x-lx)*Math.max(0, rh.s-0.1), ry = ly + (r2y-ly)*Math.max(0, rh.s-0.1);
-    BP.push({...b, lx, ly, rx, ry, flight, apex, blocked:!!h.hit});
+    BP.push({...b, lx, ly, rx, ry, flight, apex, blocked:!!h.hit, stunR:BANG.stunR});
   }
   return BP;
 }
 // where a bang is at time t: {x, y, z (height ft), state}
 function bangAt(p, t){
+  if(p.breach){ if(t < p.placeT) return null; return {x:p.tx, y:p.ty, z:3.3, state: t < p.det ? 'live' : 'spent'}; }   // the charge on the door
   if(t < p.t0) return null;
   const tl = p.t0 + p.flight;
   if(t < tl){ const f = (t - p.t0)/p.flight, z0 = p.hook ? 3.6 : 5;
@@ -1390,13 +1443,13 @@ function bangAt(p, t){
   const f = clamp((t - tl)/BANG.roll, 0, 1), e = 1-(1-f)*(1-f);
   return {x:p.lx+(p.rx-p.lx)*e, y:p.ly+(p.ry-p.ly)*e, z:0, state: t < p.det ? 'live' : 'spent'};
 }
-function flashAlpha(t){ let a = 0; for(const p of bangPaths()){ const d = t - p.det; if(d >= 0 && d < 0.7) a = Math.max(a, Math.pow(1 - d/0.7, 2)*0.85); } return a; }
+function flashAlpha(t){ let a = 0; for(const p of bangPaths()){ const d = sinceReport(p, t); if(d!=null && d < 0.7) a = Math.max(a, Math.pow(1 - d/0.7, 2)*(reports(p) > 1 ? 0.6 : 0.85)); } return a; }
 function stunnedAt(it, t){
   if(it.k==='f') return false;
   const ps = poseBase(it, t);
-  for(const p of bangPaths()){ if(t < p.det || t > p.det + BANG.stunT) continue;
-    const b = bangAt(p, p.det); if(Math.hypot(ps.x-b.x, ps.y-b.y) > BANG.stunR) continue;
-    if(firstHit(b.x, b.y, ps.x, ps.y, bangBlockers(p.det)).hit) continue; return true; }
+  for(const p of bangPaths()){ if(t < p.det || t > lastReport(p) + BANG.stunT) continue;
+    const b = bangAt(p, p.det); if(Math.hypot(ps.x-b.x, ps.y-b.y) > (p.stunR || BANG.stunR)) continue;
+    if(firstHit(b.x, b.y, ps.x, ps.y, bangBlockers(p.det, true)).hit) continue; return true; }
   return false;
 }
 /* ---------------- flagging rule ----------------
@@ -1405,7 +1458,7 @@ function stunnedAt(it, t){
    A barrel over a teammate's shoulder doesn't count, and neither does a standing shooter's barrel over a kneeling man. */
 const FLAG_R = 0.5/FT;   // 6 in, in squares
 let FB = {key:'', segs:null};
-function flagBlockers(t){ const k = ver + '|' + t.toFixed(3); if(FB.key!==k) FB = {key:k, segs:bangBlockers(t)}; return FB.segs; }
+function flagBlockers(t){ const k = ver + '|' + t.toFixed(3); if(FB.key!==k) FB = {key:k, segs:bangBlockers(t, true)}; return FB.segs; }
 /* ---------------- engagement, look priority and detaining ----------------
    Worked out once per change, after the plan, in 1/30 s steps.
    • Look priority: while a friendly is still working his plan (moving in, digging his corner) he looks where the plan
@@ -1445,7 +1498,7 @@ function runSim(){
   const roundOn = (sh, me, hp, t, P) => {
     const dx = hp.x - me.x, dy = hp.y - me.y, L = Math.hypot(dx, dy) || 1e-6, ux = dx/L, uy = dy/L, far = L + 50/FT, ex = me.x + ux*far, ey = me.y + uy*far;
     const ev = [];
-    const segs = bangBlockers(t).map((g, k) => [...g, 'o'+k]); for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h >= 5) continue; const c = rectCorners(it); for(let i=0;i<4;i++){ const a = c[i], b = c[(i+1)%4]; segs.push([a[0], a[1], b[0], b[1], it.id]); } }
+    const segs = bangBlockers(t, true).map((g, k) => [...g, 'o'+k]); for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h >= 5) continue; const c = rectCorners(it); for(let i=0;i<4;i++){ const a = c[i], b = c[(i+1)%4]; segs.push([a[0], a[1], b[0], b[1], it.id]); } }
     for(const g of segs){ const sx = ex-hp.x, sy = ey-hp.y, gx = g[2]-g[0], gy = g[3]-g[1], den = sx*gy - sy*gx; if(Math.abs(den) < 1e-9) continue;
       const qx = g[0]-hp.x, qy = g[1]-hp.y, a = (qx*gy - qy*gx)/den, u = (qx*sy - qy*sx)/den; if(a > 1e-4 && a <= 1 && u >= 0 && u <= 1) ev.push({s:a, kind:'o', id:g[4]}); }
     for(const q of people){ if(q===sh || P.get(q.id)===hp) continue; if(out.down.has(q.id) && t >= out.down.get(q.id)) continue; const o = P.get(q.id);
@@ -1457,7 +1510,7 @@ function runSim(){
     const walls = [...passed].length - (stop < 1 && !hit ? 1 : 0);
     return {x:hp.x + (ex-hp.x)*stop, y:hp.y + (ey-hp.y)*stop, hit, walls:Math.max(0, walls)}; };
   let allDown = HO.length ? Infinity : 0, last = 0;
-  for(let i=0;i<n;i++){ const t = i*dt, segs = bangBlockers(t), P = new Map(people.map(q => [q.id, posOf(q, t)]));
+  for(let i=0;i<n;i++){ const t = i*dt, segs = bangBlockers(t, true), P = new Map(people.map(q => [q.id, posOf(q, t)]));
     const sees = (a, b) => !firstHit(a.x, a.y, b.x, b.y, segs).hit;
     const angTo2 = (a, b) => deg(Math.atan2(b.y - a.y, b.x - a.x));
     const inCone = (a, facing, b, range) => Math.hypot(b.x-a.x, b.y-a.y) <= range && Math.abs(angDiff(facing, angTo2(a, b))) <= CONE_DEG/2;
@@ -1551,7 +1604,7 @@ function standOn(x, y){ let best = null; for(const it of S.items){ const f = FUR
    line of sight and within the cone's reach. Furniture of any height hides the floor behind it. Swept up to the moment
    someone calls "Clear" (or the end of the plan if nobody does). */
 let DZ = null, DZver = -1, deadOn = true;
-function sweepSegs(t){ const segs = bangBlockers(t).slice(); for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h >= 5) continue; const c = rectCorners(it); for(let i=0;i<4;i++){ const a = c[i], b = c[(i+1)%4]; segs.push([a[0], a[1], b[0], b[1]]); } } return segs; }
+function sweepSegs(t){ const segs = bangBlockers(t, true).slice(); for(const it of S.items){ const f = FURN[it.k]; if(!f || f.h >= 5) continue; const c = rectCorners(it); for(let i=0;i<4;i++){ const a = c[i], b = c[(i+1)%4]; segs.push([a[0], a[1], b[0], b[1]]); } } return segs; }
 function roomIds(){
   const W = S.cols, H = S.rows, id = new Int32Array(W*H).fill(-1), size = []; let nr = 0;
   for(let y=0;y<H;y++) for(let x=0;x<W;x++){ if(id[y*W+x] >= 0) continue; const st = [[x,y]]; id[y*W+x] = nr; let n = 0;
@@ -1593,6 +1646,12 @@ function deadSpace(){
 // for drawing: the last result straight away, worked out again a moment after the plan stops changing (keeps dragging smooth)
 let dzTimer = 0;
 function deadSpaceSoon(){ if(DZ && DZver===ver) return DZ; clearTimeout(dzTimer); dzTimer = setTimeout(() => { deadSpace(); drawPlan(); }, 250); return DZ || {pts:[], clusters:[]}; }
+// teammates too close to a charge when it goes off (in the open, within the blast)
+function breachWarn(it, a){ const b = sched().bangs.find(q => q.breach && q.by===it.id && q.key===a.key); if(!b) return [];
+  const segs = bangBlockers(b.det, true), out = [];
+  for(const q of S.items){ if(q.k!=='f') continue; const ps = poseAt(q, b.det); if(ps.down) continue;
+    if(Math.hypot(ps.x - b.tx, ps.y - b.ty) <= BREACH.stunR && !firstHit(b.tx, b.ty, ps.x, ps.y, segs).hit) out.push(`${q===it ? 'He is' : tagOf(q) + ' is'} within 12 ft of the charge, in the open, when it goes off. Back off around the corner.`); }
+  return out; }
 // what's wrong with calling "Clear" when this man does
 function clearWarn(it){ const M = sim(), out = []; if(!M.call || M.call.by!==it.id) return out;
   const D = deadSpace(); if(D.clusters.length) out.push(`${D.clusters.length===1 ? 'One patch' : D.clusters.length + ' patches'} of dead space ${D.clusters.length===1 ? 'hasn’t' : 'haven’t'} been looked at yet.`);
@@ -1821,11 +1880,11 @@ function drawPlan(){
     ctx.globalAlpha = 1;
   }
   // flashbang blast: the 15 ft circle where it stuns, shaded where the flash can actually be seen from the bang
-  for(const bp of bangPaths()){ const x = bp.rx, y = bp.ry, live = TIME >= bp.det && TIME < bp.det + BANG.stunT, v = visAt(x, y, 3);
-    ctx.save(); ctx.beginPath(); ctx.arc(x, y, BANG.stunR, 0, 7); ctx.clip();
+  for(const bp of bangPaths()){ const x = bp.rx, y = bp.ry, R = bp.stunR || BANG.stunR, live = TIME >= bp.det && TIME < lastReport(bp) + BANG.stunT, v = visAt(x, y, 3);
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.clip();
     if(v.length > 2){ polyPath(v); ctx.fillStyle = C.hostile; ctx.globalAlpha = live ? 0.22 : 0.07; ctx.fill(); }
     ctx.restore(); ctx.strokeStyle = C.hostile; ctx.globalAlpha = live ? 0.9 : 0.45; ctx.lineWidth = 1.5/sc; ctx.setLineDash([4/sc, 4/sc]);
-    ctx.beginPath(); ctx.arc(x, y, BANG.stunR, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+    ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
 
   // static arrows
   for(const a of S.arrows){
@@ -1867,12 +1926,16 @@ function drawPlan(){
     if(e.t==='n'){
       ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(p[2],p[3]); ctx.stroke();
       ctx.strokeStyle = C.sheet; ctx.lineWidth = wallW*0.45; ctx.beginPath(); ctx.moveTo(p[0]+(p[2]-p[0])*0.06,p[1]+(p[3]-p[1])*0.06); ctx.lineTo(p[2]-(p[2]-p[0])*0.06,p[3]-(p[3]-p[1])*0.06); ctx.stroke();
-      ctx.strokeStyle = C.ink2; ctx.lineWidth = 1/sc; ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(p[2],p[3]); ctx.stroke();
+      if(windowBroken(k, TIME)){ ctx.strokeStyle = C.hostile; ctx.lineWidth = 1.6/sc; ctx.setLineDash([2/sc, 3/sc]); }   // broken out: just the frame
+      else { ctx.strokeStyle = C.ink2; ctx.lineWidth = 1/sc; }
+      ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(p[2],p[3]); ctx.stroke(); ctx.setLineDash([]);
     } else {
       ctx.lineWidth = Math.max(0.06,1.6/sc); ctx.beginPath();
       ctx.moveTo(p[0]-nx*j,p[1]-ny*j); ctx.lineTo(p[0]+nx*j,p[1]+ny*j);
       ctx.moveTo(p[2]-nx*j,p[3]-ny*j); ctx.lineTo(p[2]+nx*j,p[3]+ny*j); ctx.stroke();
-      if(e.t==='d'){
+      if(e.t==='d' && doorBlown(k, TIME)){   // blown off its hinges: just the empty frame
+        ctx.strokeStyle = C.hostile; ctx.lineWidth = 1.6/sc; ctx.setLineDash([2/sc, 3/sc]); ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(p[2],p[3]); ctx.stroke(); ctx.setLineDash([]); }
+      else if(e.t==='d'){
         const ang = doorAngle(k, TIME), ds = doorSims().get(k), max = ds ? ds.max : 90, s = doorSlab(d,x,y,e,ang);
         const a0 = Math.atan2(s.uy,s.ux), cw2 = (s.ux*s.ny - s.uy*s.nx) > 0, a1 = a0 + (cw2?1:-1)*rad(max);
         ctx.strokeStyle = C.ink2; ctx.lineWidth = 1/sc; ctx.setLineDash([3/sc,3/sc]);
@@ -1954,9 +2017,11 @@ function drawPlan(){
     const hasPath = it.path && it.path.length, isSel = sp===it;
     if(!hasPath && !(isSel && it.acts && it.acts.length)) continue;
     const raw = routePts(it), col = pColor(it,C), pts = raw.map(p => toScreen(p.x,p.y)), scI = SC2.map.get(it.id), blk = scI && scI.blocked;
+    // with past routes hidden: legs he's finished by now aren't drawn (the waypoint he's at or just left stays)
+    let kHide = 0; if(pastOff && scI && TIME > 0.001) while(kHide < (it.path||[]).length && scI.arr[kHide]!=null && scI.arr[kHide] <= TIME) kHide++;
     // the route as drawn: curves followed, and split where something stops him (the rest is greyed out)
     const live = [], dead = [];
-    for(let i=1;i<raw.length;i++){ const A = raw[i-1], B = raw[i], P = legPoly(A, B).map(q => toScreen(q.x, q.y));
+    for(let i=1;i<raw.length;i++){ if(i-1 < kHide) continue; const A = raw[i-1], B = raw[i], P = legPoly(A, B).map(q => toScreen(q.x, q.y));
       if(!blk || i-1 < blk.leg){ live.push(P); continue; }
       if(i-1 > blk.leg){ dead.push(P); continue; }
       const cut = toScreen(blk.x, blk.y), fe = legNearest(A, B, blk.x, blk.y).f, n = Math.max(1, Math.round(fe*(P.length-1)));
@@ -1970,7 +2035,7 @@ function drawPlan(){
       ctx.strokeStyle = isPick ? C.accent : col; ctx.globalAlpha = isPick ? 1 : isSel ? (pickWho ? 0.35 : 0.9) : ghost ? 0.12 : 0.4; ctx.lineWidth = isPick ? 3 : isSel ? 2.4 : 1.6; ctx.lineJoin='round';
       strokeLegs(live);
       const bendable = isSel && !pickWho && !READONLY && (tool==='select' || tool==='path');
-      for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i], L = Math.hypot(b.x-a.x,b.y-a.y); if(L<26 || (blk && i-1 > blk.leg)) continue;
+      for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i], L = Math.hypot(b.x-a.x,b.y-a.y); if(L<26 || (blk && i-1 > blk.leg) || i-1 < kHide) continue;
         const lp = legPt(raw[i-1], raw[i], 0.5), m = toScreen(lp.x, lp.y), an = rad(lp.r), q = 5, mx = m.x, my = m.y;
         if(bendable && L >= 40) continue;   // the bend handle sits here instead
         ctx.beginPath(); ctx.moveTo(mx-Math.cos(an-0.6)*q, my-Math.sin(an-0.6)*q); ctx.lineTo(mx,my); ctx.lineTo(mx-Math.cos(an+0.6)*q, my-Math.sin(an+0.6)*q); ctx.stroke(); }
@@ -1979,7 +2044,7 @@ function drawPlan(){
         ctx.beginPath(); ctx.moveTo(h.x-k,h.y-k); ctx.lineTo(h.x+k,h.y+k); ctx.moveTo(h.x+k,h.y-k); ctx.lineTo(h.x-k,h.y+k); ctx.stroke();
         if(isSel) pill(h.x, h.y - 16, 'BLOCKED · HE STOPS HERE', C.hostile, '#ffffff'); }
       // bend handles: drag the diamond in the middle of a leg to curve it
-      if(bendable) for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i]; if(Math.hypot(b.x-a.x,b.y-a.y) < 40) continue;
+      if(bendable) for(let i=1;i<pts.length;i++){ const a = pts[i-1], b = pts[i]; if(Math.hypot(b.x-a.x,b.y-a.y) < 40 || i-1 < kHide) continue;
         const lp = legPt(raw[i-1], raw[i], 0.5), m = toScreen(lp.x, lp.y), on = isCurved(raw[i]), k = on ? 6 : 5;
         ctx.globalAlpha = 1; ctx.fillStyle = on ? col : C.sheet; ctx.strokeStyle = col; ctx.lineWidth = 1.6;
         ctx.beginPath(); ctx.moveTo(m.x, m.y-k); ctx.lineTo(m.x+k, m.y); ctx.lineTo(m.x, m.y+k); ctx.lineTo(m.x-k, m.y); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -1987,11 +2052,11 @@ function drawPlan(){
       ctx.globalAlpha = 1;
     }
     const ps0 = pts[0];
-    if(TIME > 0.001 && hasPath){ ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.arc(ps0.x,ps0.y,R0*0.8,0,7); ctx.stroke(); ctx.setLineDash([]);
+    if(TIME > 0.001 && hasPath && !kHide){ ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.arc(ps0.x,ps0.y,R0*0.8,0,7); ctx.stroke(); ctx.setLineDash([]);
       if(isSel) hits.push({kind:'start', it, x:ps0.x, y:ps0.y, rx:R0, ry:R0}); }
-    if(isSel && !pickWho){ drawLooks(it, it.acts, ps0, col, -1); drawActBadges(ctx, ps0, it.acts, col, C, R0); }
+    if(isSel && !pickWho && !kHide){ drawLooks(it, it.acts, ps0, col, -1); drawActBadges(ctx, ps0, it.acts, col, C, R0); }
     const arrT = SC2.map.get(it.id), stayW = isSel ? stayWindows(it) : null;
-    (it.path||[]).forEach((w,i) => {
+    (it.path||[]).forEach((w,i) => { if(i < kHide - 1) return;
       const p = pts[i+1], wsel = sel && sel.type==='wp' && sel.id===it.id && sel.i===i;
       if(isSel && !pickWho && w.lx!=null){ const lq = toScreen(w.lx,w.ly);
         ctx.strokeStyle = col; ctx.globalAlpha = wsel?0.85:0.45; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(lq.x,lq.y); ctx.stroke(); ctx.setLineDash([]);
@@ -2034,7 +2099,10 @@ function drawPlan(){
   { const M = sim(); for(const rd of M.rounds){ if(!(rd.hit || rd.walls) || TIME < rd.t || TIME > rd.t + 0.8) continue;
       const a = toScreen(rd.x1, rd.y1), b = toScreen(rd.x2, rd.y2); ctx.strokeStyle = C.hostile; ctx.lineWidth = 2; ctx.setLineDash([5,4]); ctx.globalAlpha = 1 - (TIME - rd.t)/0.8;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; } }
-  for(const bp of bangPaths()){ const q = toScreen(bp.rx, bp.ry + BANG.stunR); pill(q.x, q.y - 10, TIME >= bp.det && TIME < bp.det + BANG.stunT ? 'FLASHED ZONE' : 'BANG · 15 FT', C.hostile, '#ffffff'); }
+  for(const bp of bangPaths()){ if(bp.breach && TIME >= bp.det && TIME < bp.det + 1.2){ const c = toScreen(bp.rx, bp.ry); pill(c.x, c.y - 26, 'BREACH!', C.hostile, '#ffffff'); } }
+  for(const bp of bangPaths()){ const R = bp.stunR || BANG.stunR, q = toScreen(bp.rx, bp.ry + R), live = TIME >= bp.det && TIME < lastReport(bp) + BANG.stunT;
+    const kk = reports(bp) > 1 && TIME >= bp.det ? Math.min(reports(bp), Math.floor((TIME - bp.det)/BANG.gap) + 1) : 0;
+    pill(q.x, q.y - 10, bp.breach ? (live ? 'BLAST ZONE' : 'BREACH · 12 FT') : live ? (kk && kk < reports(bp) ? `FLASHED ZONE · ${kk}/9` : 'FLASHED ZONE') : (reports(bp) > 1 ? '9-BANG · 15 FT' : 'BANG · 15 FT'), C.hostile, '#ffffff'); }
   // shots: a short tracer from shooter to target and a flash at the muzzle
   { const M = sim(); for(const sh of M.shots){ if(TIME < sh.t || TIME > sh.t + 0.14) continue; const by = getItem(sh.by), at = getItem(sh.at); if(!by || !at) continue;
       const a = poses.get(by.id), b = poses.get(at.id); if(!a || !b) continue; const p0 = toScreen(a.x, a.y), p1 = toScreen(b.x, b.y);
@@ -2130,7 +2198,7 @@ function drawPlan(){
       const cy = s.y - b.z*V.sc/FT*0.9; ctx.fillStyle = '#3d4a35'; ctx.strokeStyle = C.sheet; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(s.x, cy, Math.max(4, V.sc*0.13), 0, 7); ctx.fill(); ctx.stroke();
       if(b.state==='live' && Math.floor(TIME*6)%2===0){ ctx.strokeStyle = C.hostile; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(s.x, cy, Math.max(7, V.sc*0.22), 0, 7); ctx.stroke(); }
     } else {
-      if(dt < 0.6){ const f = dt/0.6; ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 1-f; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(s.x, s.y, V.sc*(0.4 + f*BANG.stunR), 0, 7); ctx.stroke();
+      const dr = sinceReport(p, TIME); if(dr!=null && dr < 0.6){ const f = dr/0.6; ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 1-f; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(s.x, s.y, V.sc*(0.4 + f*BANG.stunR), 0, 7); ctx.stroke();
         ctx.strokeStyle = '#f2c94c'; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1; }
       if(dt < 5){ const fade = dt < 0.3 ? dt/0.3 : 1 - Math.max(0, dt-2)/3;
         for(let i=0;i<7;i++){ const a = i*0.9 + p.det, rr = V.sc*(0.4 + Math.min(dt,3)*0.35)*(0.6 + (i%3)*0.25), ox = Math.cos(a)*V.sc*0.5*Math.min(dt,2), oy = Math.sin(a)*V.sc*0.5*Math.min(dt,2);
@@ -2188,8 +2256,12 @@ function actTag(a){
     case 'open': return '🔓 '+a.name;
     case 'gate': return '🔒 '+a.name;
     case 'sync': return 'SYNC '+a.c;
-    case 'bang': return '💥 ' + (a.hook ? 'HOOK ' : '') + 'BANG ' + (+a.fuse||1.5).toFixed(1) + 's';
+    case 'bang': return '💥 ' + (a.hook ? 'HOOK ' : '') + (a.n===1 ? 'BANG ' : '9-BANG ') + (+a.fuse||1.5).toFixed(1) + 's';
     case 'clear': return '📣 CLEAR';
+    case 'bwin': return '🔨 BREAK WINDOW';
+    case 'breach': return '💥 BREACH ' + (+(a.d==null ? 3 : a.d)).toFixed(1) + 's';
+    case 'wsec': return '✔ ON SECURE' + (a.d ? ' +' + (+a.d).toFixed(1) : '');
+    case 'wbreach': { const w = a.by && getItem(a.by); return 'ON BREACH' + (w ? ' ('+tagOf(w)+')' : '') + (a.d ? ' ' + (a.d>0?'+':'') + (+a.d).toFixed(1) : ''); }
     case 'bcall': { const to = a.to && getItem(a.to); return '✊ BANG CALL' + (to ? ' → ' + tagOf(to) : ''); }
     case 'btake': { const fr = a.from && getItem(a.from); return '✋ TAKES CALL' + (fr ? ' ← ' + tagOf(fr) : ''); }
     case 'wbang': { const w = a.by && getItem(a.by); return 'MOVE ON BANG' + (w ? ' ('+tagOf(w)+')' : '') + (a.d ? ' ' + (a.d>0?'+':'') + (+a.d).toFixed(1) : ''); }
@@ -2357,8 +2429,8 @@ function startTool(sx,sy){
       if(L.route){ const a = owner.acts && owner.acts[L.a], who = a && getItem(a.who), nr = who && nearestRoute(p.x, p.y, Math.max(0.6, 16/V.sc), who);
         if(!nr){ undoStack.pop(); updateUndo(); lookArm = L; updateHint(); toast(who ? 'Tap right on ' + tagOf(who) + '’s route' : 'Pick whose route first'); return null; }
         a.seg = nr.seg; a.f = r2(nr.f); a.set = 1; }
-      else if(L.door){ const ne = nearestEdge(p.x,p.y), ed = ne && S.edges.get(ne.key), a = owner.acts && owner.acts[L.a];
-        if(!ed || ed.t!=='d' || ne.dist > 0.6){ undoStack.pop(); updateUndo(); lookArm = L; updateHint(); toast('Tap right on a door'); return null; }
+      else if(L.door){ const ne = nearestEdge(p.x,p.y), ed = ne && S.edges.get(ne.key), a = owner.acts && owner.acts[L.a], want = a && a.k==='bwin' ? 'n' : 'd';
+        if(!ed || ed.t!==want || ne.dist > 0.6){ undoStack.pop(); updateUndo(); lookArm = L; updateHint(); toast(want==='n' ? 'Tap right on a window' : 'Tap right on a door'); return null; }
         if(a) a.key = ne.key; }
       else if(L.a==null){ owner.lx = snap(p.x,1/6); owner.ly = snap(p.y,1/6); }
       else { const a = owner.acts && owner.acts[L.a]; if(a){ a.x = snap(p.x,1/6); a.y = snap(p.y,1/6); a.set = 1; } }
@@ -2435,6 +2507,7 @@ function startTool(sx,sy){
         const t = tool==='door'?'d':tool==='opening'?'o':'n', e = S.edges.get(ne.key), b0 = blockedIds();
         checkpoint();
         if(e && e.t==='d' && t==='d'){ e.s=(e.s+1)&3; }
+        else if(e && e.t==='n' && t==='n'){ e.s = (e.s & 1) ? 0 : 1; toast(e.s ? 'Window broken out · bangs go through it now. Tap again to put the glass back' : 'Glass back in'); }
         else S.edges.set(ne.key,{t, s:e&&e.t==='d'?e.s:0, a:e&&e.t==='d'?e.a:0});
         sel = t==='d' ? {type:'edge',key:ne.key} : null; changed(); renderInspector(); noteNewBlocks(b0, 'window'); }};
     }
@@ -2572,15 +2645,27 @@ function actsEditor(it, owner, oi){
     else if(a.k==='open' || a.k==='gate') body = `<input type="text" data-af="n" data-ai="${ai}" id="af-n-${ai}" list="gate-names" maxlength="24" value="${esc(a.name)}" aria-label="Gate name"><span class="small">${a.k==='open' ? 'lets anyone waiting on it go' : 'holds here until someone opens it'}</span>`;
     else if(a.k==='bang'){ const bArm = lookArm && !lookArm.door && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
       const bp = bangPaths().find(p => p.by===it.id && Math.abs(p.tx-a.x)<1e-6 && Math.abs(p.ty-a.y)<1e-6);
-      body = `${segA('a-hook', ai, [[1,'Hook'],[0,'Overhand']], a.hook?1:0)}<button class="btn sm ${bArm?'on':''}" data-act="a-look" data-ai="${ai}">${bArm ? 'Tap where it lands…' : 'Move landing spot'}</button><span class="small">fuse</span>${stepA('a-fuse', ai, a.fuse||1.5, 's')}
+      body = `${segA('a-nine', ai, [[9,'9-banger'],[1,'Single']], a.n===1 ? 1 : 9)}${segA('a-hook', ai, [[1,'Hook'],[0,'Overhand']], a.hook?1:0)}<button class="btn sm ${bArm?'on':''}" data-act="a-look" data-ai="${ai}">${bArm ? 'Tap where it lands…' : 'Move landing spot'}</button><span class="small">fuse</span>${stepA('a-fuse', ai, a.fuse||1.5, 's')}
         ${bp ? `<span class="small">${(Math.hypot(a.x-(oi<0?it.x:owner.x), a.y-(oi<0?it.y:owner.y))*FT).toFixed(0)} ft throw · goes off at ${bp.det.toFixed(1)} s</span>` : ''}
         ${bp && bp.blocked ? '<span class="small" style="color:var(--hostile)">Something is in the way: it hits it and drops short.</span>' : ''}`; }
+    else if(a.k==='bwin'){ const ok = a.key && S.edges.get(a.key) && S.edges.get(a.key).t==='n', dArm = lookArm && lookArm.door && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
+      const pos = oi<0 ? {x:it.x, y:it.y} : owner, c = ok && doorCenter(a.key), far = c && Math.hypot(c.x-pos.x, c.y-pos.y) > 1.6;
+      body = `<button class="btn sm ${dArm?'on':''}" data-act="a-door" data-ai="${ai}">${dArm ? 'Tap a window…' : ok ? 'Change window' : 'Pick the window'}</button>
+        <span class="small">${ok ? 'turns to it and breaks out the glass with his muzzle, so a bang can go through' : 'No window picked yet.'}</span>${far ? '<span class="small" style="color:var(--hostile)">He’s more than 5 ft from it. Put this on a waypoint next to the window.</span>' : ''}`; }
+    else if(a.k==='breach'){ const ok = a.key && S.edges.get(a.key) && S.edges.get(a.key).t==='d', dArm = lookArm && lookArm.door && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
+      const W = ok ? breachWarn(it, a) : [];
+      body = `<button class="btn sm ${dArm?'on':''}" data-act="a-door" data-ai="${ai}">${dArm ? 'Tap a door…' : ok ? 'Change door' : 'Pick the door'}</button>
+        <span class="small">goes off</span>${stepA('a-dur', ai, a.d==null ? 3 : a.d, 's')}<span class="small">after the charge is set · blows the door, stuns anyone within 12 ft who can see it. Use “Move on bang” to go on the blast.</span>
+        ${W.map(x => `<span class="small" style="color:var(--hostile)">${x}</span>`).join('')}`; }
     else if(a.k==='clear'){ const W = clearWarn(it), dz = deadSpace().clusters.length; body = `<span class="small">calls “Clear”: once every bad guy is down, the team starts detaining.</span>${W.map(x => `<span class="small" style="color:var(--hostile)">${x}</span>`).join('')}${dz ? `<button class="btn sm" data-act="deadfix">Clear dead space (${dz})</button>` : ''}`; }
     else if(a.k==='bcall') body = `<select data-af="to" data-ai="${ai}" id="af-bc-${ai}" aria-label="Who takes the call"><option value="">nobody (not in a stack)</option>${others.map(q => `<option value="${q.id}" ${a.to===q.id?'selected':''}>to ${esc(tagOf(q))}</option>`).join('')}</select>
       <span class="small">${a.to ? 'arm up, fist pumps three times, then the fist stays up until he puts his hand on it' : 'arm up, fist pumps three times, hand back on the rifle'}</span>`;
     else if(a.k==='btake') body = `<select data-af="from" data-ai="${ai}" id="af-bt-${ai}" aria-label="Whose call"><option value="">from anyone</option>${others.map(q => `<option value="${q.id}" ${a.from===q.id?'selected':''}>from ${esc(tagOf(q))}</option>`).join('')}</select>
       ${segA('a-how', ai, [['hand','Hand on his fist'],['nod','Nod']], a.how==='nod' ? 'nod' : 'hand')}
       <span class="small">waits for the call, ${a.how==='nod' ? 'nods to say he has it' : 'puts his hand on the fist (signal received)'}, then gets the bang out. Follow with “Throw flashbang”.</span>`;
+    else if(a.k==='wsec') body = `${stepA('a-off', ai, a.d||0, 's')}<span class="small">after every bad guy is down and every civilian is cuffed${secureHint!=null && sched() ? ` (that’s at ${(secureHint + (a.d||0)).toFixed(1)} s)` : ''}. He calls “Secure”, then anything after this (moving out, setting up hall boss) goes.</span>`;
+    else if(a.k==='wbreach') body = `<select data-af="by" data-ai="${ai}" id="af-wb-${ai}" aria-label="Whose breach"><option value="">any breach</option>${others.map(q => `<option value="${q.id}" ${a.by===q.id?'selected':''}>${esc(tagOf(q))}’s breach</option>`).join('')}</select>
+      ${stepA('a-off', ai, a.d||0, 's')}<span class="small">${(a.d||0) < 0 ? 'before it blows' : (a.d||0) > 0 ? 'after it blows' : 'right as it blows'}. Anything after this (a bang, a move) waits for it.</span>`;
     else if(a.k==='wbang') body = `<select data-af="by" data-ai="${ai}" id="af-by-${ai}" aria-label="Whose bang"><option value="">anyone’s bang</option>${others.map(q => `<option value="${q.id}" ${a.by===q.id?'selected':''}>${esc(tagOf(q))}’s bang</option>`).join('')}</select>
       ${stepA('a-off', ai, a.d||0, 's')}<span class="small">${(a.d||0) < 0 ? 'before it goes off' : (a.d||0) > 0 ? 'after it goes off' : 'right as it goes off'}</span>`;
     else if(a.k==='wdoor'){ const ok = a.key && S.edges.get(a.key) && S.edges.get(a.key).t==='d', dArm = lookArm && lookArm.door && lookArm.id===it.id && lookArm.i===oi && lookArm.a===ai;
@@ -2712,6 +2797,7 @@ function renderInspector(){
       <div class="insp-actions"><button class="btn" data-act="hinge">Flip hinge side</button><button class="btn" data-act="swing">Flip push / pull</button><button class="btn danger" data-act="del">Remove</button></div>`;
     } else {
       h = `<div class="insp-head">${EDGE_NAME[e.t]}</div>
+      ${e.t==='n' ? `<div class="insp-row"><span class="lbl">Glass</span>${seg('wglass', [[0,'Intact'],[1,'Broken out']], e.s & 1)}<span class="small tip">You can see and shoot through it either way. A bang only goes through once it’s broken: start it broken here, or give someone “Break window”.</span></div>` : ''}
       <div class="insp-row"><span class="lbl">Change to</span><div class="row">${['w','d','o','n'].filter(t=>t!==e.t).map(t=>`<button class="btn" data-act="etype" data-v="${t}">${EDGE_NAME[t]}</button>`).join('')}</div></div>
       <div class="insp-actions"><button class="btn danger" data-act="del">Remove</button></div>`;
     }
@@ -2780,7 +2866,8 @@ insp.addEventListener('click', e => {
     if(act==='dstate') e2.a = +v;
     else if(act==='hinge') e2.s ^= 1;
     else if(act==='swing') e2.s ^= 2;
-    else if(act==='etype'){ e2.t = v; if(v!=='d'){ e2.a=0; } }
+    else if(act==='etype'){ e2.t = v; if(v!=='d'){ e2.a=0; e2.s=0; } }
+    else if(act==='wglass') e2.s = +v;
     else if(act==='del'){ S.edges.delete(sel.key); sel=null; }
   }
   changed(); renderInspector();
@@ -2808,15 +2895,21 @@ function actClick(act, v, ai){
     else if(v==='sig'){ const others = S.items.filter(q => isPerson(q) && q!==it && q.k===it.k); let best = null, bd = 1e9;
       for(const q of others){ const d = Math.hypot(q.x-it.x, q.y-it.y); if(d<bd){ bd=d; best=q; } }
       a = {k:'sig', s:'nod', to:best?best.id:null, d:0.8, txt:''}; }
-    else if(v==='bang'){ a = {k:'bang', x:snap(here.x + Math.cos(rad(here.r))*3,1/6), y:snap(here.y + Math.sin(rad(here.r))*3,1/6), fuse:1.5, hook:1}; }
+    else if(v==='bang'){ a = {k:'bang', x:snap(here.x + Math.cos(rad(here.r))*3,1/6), y:snap(here.y + Math.sin(rad(here.r))*3,1/6), fuse:1.5, hook:1, n:9}; }
     else if(v==='clear') a = {k:'clear'};
+    else if(v==='breach'){ let best = null, bd = 1e9; for(const [k,e] of S.edges){ if(e.t!=='d') continue; const c = doorCenter(k), dd = Math.hypot(c.x-here.x, c.y-here.y); if(dd < bd){ bd = dd; best = k; } }
+      a = {k:'breach', key: bd < 2.5 ? best : '', d:3}; }
+    else if(v==='bwin'){ let best = null, bd = 1e9; for(const [k,e] of S.edges){ if(e.t!=='n') continue; const c = doorCenter(k), dd = Math.hypot(c.x-here.x, c.y-here.y); if(dd < bd){ bd = dd; best = k; } }
+      a = {k:'bwin', key: bd < 2.5 ? best : ''}; }
     else if(v==='bcall' || v==='btake'){ const others = S.items.filter(q => isPerson(q) && q!==it && q.k===it.k); let best = null, bd = 1e9;
       // the man right behind him takes the call; the man right in front makes it
       const fwd = {x:Math.cos(rad(here.r)), y:Math.sin(rad(here.r))};
       for(const q of others){ const qp = poseAt(q, 1e9), dx = qp.x-here.x, dy = qp.y-here.y, d = Math.hypot(dx, dy), ahead = dx*fwd.x + dy*fwd.y > 0;
         if(d < 2.5 && (v==='bcall' ? !ahead : ahead) && d < bd){ bd = d; best = q; } }
       a = v==='bcall' ? {k:'bcall', to:best ? best.id : null} : {k:'btake', from:best ? best.id : ''}; }
-    else if(v==='wbang'){ const thr = S.items.find(q => isPerson(q) && q!==it && [q.acts, ...(q.path||[]).map(w => w.acts)].some(l => (l||[]).some(x => x.k==='bang')));
+    else if(v==='wsec') a = {k:'wsec', d:0};
+    else if(v==='wbreach'){ const br = S.items.find(q => isPerson(q) && [q.acts, ...(q.path||[]).map(w => w.acts)].some(l => (l||[]).some(x => x.k==='breach'))); a = {k:'wbreach', by:br ? br.id : '', d:0}; }
+    else if(v==='wbang'){ const thr = S.items.find(q => isPerson(q) && q!==it && [q.acts, ...(q.path||[]).map(w => w.acts)].some(l => (l||[]).some(x => x.k==='bang' || x.k==='breach')));
       a = {k:'wbang', by:thr ? thr.id : '', d:-0.5}; }
     else if(v==='wdoor'){ let best = null, bd = 1e9; for(const [k,e] of S.edges){ if(e.t!=='d') continue; const c = doorCenter(k), dd = Math.hypot(c.x-here.x, c.y-here.y); if(dd < bd){ bd = dd; best = k; } }
       a = {k:'wdoor', key: bd < 4 ? best : '', at:'half'}; }
@@ -2835,21 +2928,22 @@ function actClick(act, v, ai){
     else if(v==='door'){ let best = null, bd = 1e9; for(const [k,e] of S.edges){ if(e.t!=='d') continue; const c = doorCenter(k), dd = Math.hypot(c.x-here.x, c.y-here.y); if(dd < bd){ bd = dd; best = k; } }
       const used = new Set(gateNames()); let n = 1; while(used.has('Door '+n)) n++;
       a = {k:'door', key: bd < 3 ? best : '', how:'hand', name:'Door '+n}; }
-    if(a){ acts.push(a); if(a.k==='look' || a.k==='bang'){ lookArm = {id:it.id, i:oi, a:acts.length-1, bang:a.k==='bang'}; updateHint(); } if((a.k==='door' || a.k==='wdoor') && !a.key){ lookArm = {id:it.id, i:oi, a:acts.length-1, door:true}; updateHint(); } if(a.k==='wloc' && a.who){ lookArm = {id:it.id, i:oi, a:acts.length-1, route:true}; updateHint(); } }
+    if(a){ acts.push(a); if((a.k==='bwin' || a.k==='breach') && !a.key){ lookArm = {id:it.id, i:oi, a:acts.length-1, door:true}; updateHint(); } if(a.k==='look' || a.k==='bang'){ lookArm = {id:it.id, i:oi, a:acts.length-1, bang:a.k==='bang'}; updateHint(); } if((a.k==='door' || a.k==='wdoor') && !a.key){ lookArm = {id:it.id, i:oi, a:acts.length-1, door:true}; updateHint(); } if(a.k==='wloc' && a.who){ lookArm = {id:it.id, i:oi, a:acts.length-1, route:true}; updateHint(); } }
   } else {
     const a = acts[ai]; if(!a){ return; }
     if(act==='a-up' && ai>0) [acts[ai-1], acts[ai]] = [acts[ai], acts[ai-1]];
     else if(act==='a-dn' && ai<acts.length-1) [acts[ai+1], acts[ai]] = [acts[ai], acts[ai+1]];
     else if(act==='a-del'){ acts.splice(ai,1); lookArm = null; }
-    else if(act==='a-dur') a.d = clamp(r2((a.d||0) + (+v)), a.k==='sig' ? 0.1 : 0, a.k==='mwith' ? 10 : 600);
+    else if(act==='a-dur') a.d = clamp(r2((a.d==null ? (a.k==='breach' ? 3 : 0) : a.d) + (+v)), a.k==='sig' ? 0.1 : a.k==='breach' ? 0.5 : 0, a.k==='mwith' ? 10 : 600);
     else if(act==='a-gun') a.g = +v;
     else if(act==='a-sync') a.c = v;
     else if(act==='a-how') a.how = v;
     else if(act==='a-sweep') a.sw = +v;
     else if(act==='a-at') a.at = v;
     else if(act==='a-hook') a.hook = +v;
+    else if(act==='a-nine') a.n = +v;
     else if(act==='a-fuse') a.fuse = clamp(r2((a.fuse||1.5) + (+v)), 0.5, 5);
-    else if(act==='a-off') a.d = clamp(r2((a.d||0) + (+v)), a.k==='wloc' ? -10 : -3, 5);
+    else if(act==='a-off') a.d = clamp(r2((a.d||0) + (+v)), a.k==='wloc' ? -10 : a.k==='wsec' ? 0 : -3, a.k==='wbreach' || a.k==='wsec' ? 10 : 5);
   }
   if(!acts.length) delete owner.acts;
   changed(); renderInspector();
@@ -2890,7 +2984,7 @@ function setMode(m){
   const plan = m==='plan';
   planCv.hidden = !plan; toolsEl.hidden = !plan; $('#timeline').classList.toggle('last', !plan); $('#hud-legend').hidden = !plan; $('#tool-hint').hidden = !plan;
   $('#btn-fit').textContent = plan ? 'Fit' : m==='walk' ? 'Restart' : 'Reset view';
-  $('#btn-dead').hidden = m!=='plan'; $('#btn-deadfix').hidden = true;
+  $('#btn-dead').hidden = m!=='plan'; $('#btn-past').hidden = m!=='plan'; $('#btn-deadfix').hidden = true;
   $('#btn-threat').hidden = m==='walk'; $('#btn-cones').hidden = m==='walk'; $('#btn-routes').hidden = m==='walk';
   syncCamUI();
   hidePicker(); renderInspector(); updateCaption(); updateHint();
@@ -3008,7 +3102,7 @@ function applyCam(){
   const cv = camView(TIME); if(cv){ setCam(c, cv); return; }
   if(mode==='walk'){ const w = T.walk, cp = Math.cos(w.pitch); c.fov = 72; c.position.set(w.x, w.eye, w.z);
     c.lookAt(w.x+Math.cos(w.yaw)*cp, w.eye+Math.sin(w.pitch), w.z+Math.sin(w.yaw)*cp); }
-  else { const o = T.orbit; c.fov = 50; c.position.set(o.tx+o.r*Math.sin(o.ph)*Math.cos(o.th), o.r*Math.cos(o.ph), o.tz+o.r*Math.sin(o.ph)*Math.sin(o.th)); c.lookAt(o.tx,0,o.tz); }
+  else { const o = T.orbit; c.fov = 50; const ty = o.ty || 0; c.position.set(o.tx+o.r*Math.sin(o.ph)*Math.cos(o.th), ty + o.r*Math.cos(o.ph), o.tz+o.r*Math.sin(o.ph)*Math.sin(o.th)); c.lookAt(o.tx,ty,o.tz); }
   c.updateProjectionMatrix();
 }
 /* ---------------- 3D people ----------------
@@ -3018,91 +3112,174 @@ function applyCam(){
    Armed figures hold the rifle with both hands; arms and rifle turn together, so gun posture moves the whole weapon. */
 const SKIN = ['#c99c79','#a8774f','#7a5236','#e0b896','#5c3d28'];
 const CIV_SHIRT = ['#c9c3b6','#6f8fb0','#b5838d','#9aa58b','#d1a35b'];
+// cloth patterns drawn once per scene: a woodland-style camo for the team, light weave noise for street clothes
+function clothTex(base, blobs, seed, n=90, rep=2){
+  const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
+  let s = seed >>> 0; const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  x.fillStyle = base; x.fillRect(0, 0, 256, 256);
+  for(let i=0;i<n;i++){ x.fillStyle = blobs[i % blobs.length]; let cx = rnd()*256, cy = rnd()*256; const a = rnd()*Math.PI, k = 2 + (rnd()*4|0);
+    for(let j=0;j<k;j++){ const rx = 3 + rnd()*9, ry = 2 + rnd()*5;
+      for(const ox of [-256, 0, 256]) for(const oy of [-256, 0, 256]){ x.beginPath(); x.ellipse(cx+ox, cy+oy, rx, ry, a + (rnd()-0.5)*0.8, 0, Math.PI*2); x.fill(); }
+      cx += Math.cos(a)*(4 + rnd()*7); cy += Math.sin(a)*(4 + rnd()*7); } }
+  const img = x.getImageData(0, 0, 256, 256), d = img.data;   // fine fabric grain
+  for(let i=0;i<d.length;i+=4){ const g = (rnd() - 0.5) * 18; d[i] += g; d[i+1] += g; d[i+2] += g; }
+  x.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); return t;
+}
+const lathe = (pts, seg=20) => new THREE.LatheGeometry(pts.map(([r,y]) => new THREE.Vector2(r, y)), seg);
 function figureKit(){
-  const std = (color, rough=0.85, metal=0) => new THREE.MeshStandardMaterial({color, roughness:rough, metalness:metal});
+  const std = (color, rough=0.85, metal=0, map=null) => new THREE.MeshStandardMaterial({color: map ? '#ffffff' : color, roughness:rough, metalness:metal, map});
+  const camo = clothTex('#7b7558', ['#5d6044', '#8f8462', '#4a4535', '#a39a76'], 7, 260, 2);
+  const camoP = clothTex('#716b50', ['#575a3f', '#867b5a', '#433f31', '#9a9070'], 11, 260, 2);
   return {
     std,
-    mat:{ uni:std('#77735a'), pants:std('#6c6852'), vest:std('#4e553f'), pouch:std('#454b38'), helm:std('#5a5944', 0.7), boot:std('#3a3127', 0.9), glove:std('#2c2c29'),
-      gun:std('#1f2121', 0.45, 0.35), gunTan:std('#8a7a5c', 0.6, 0.1), optic:std('#151616', 0.3, 0.5), lens:std('#2f4f6b', 0.1, 0.8),
-      hJacket:std('#5a2f2a'), hPants:std('#2e3440'), beanie:std('#1d1d1f'), shoe:std('#222225'), hair:std('#2a1d15'), jeans:std('#3d4a63') },
-    geo:{ thigh:new THREE.CylinderGeometry(0.29, 0.21, 1.45, 16).translate(0,-0.725,0), shin:new THREE.CylinderGeometry(0.2, 0.15, 1.4, 16).translate(0,-0.7,0),
-      boot:new THREE.SphereGeometry(1, 18, 12), sole:new THREE.CylinderGeometry(1, 1, 1, 18), pelvis:new THREE.SphereGeometry(1, 18, 14),
-      joint:new THREE.SphereGeometry(1, 16, 12),
-      torso:new THREE.LatheGeometry([[0.001,-0.78],[0.36,-0.76],[0.42,-0.55],[0.44,-0.25],[0.48,0.1],[0.5,0.38],[0.47,0.58],[0.38,0.72],[0.2,0.8],[0.001,0.82]].map(([r,y]) => new THREE.Vector2(r,y)), 22), plate:new THREE.BoxGeometry(0.16, 1.05, 0.9), pouch:new THREE.BoxGeometry(0.16, 0.3, 0.22), pack:new THREE.BoxGeometry(0.3, 0.9, 0.62),
-      neck:new THREE.CylinderGeometry(0.15, 0.17, 0.3, 8), head:new THREE.SphereGeometry(0.36, 16, 12), helm:new THREE.SphereGeometry(0.44, 16, 10, 0, Math.PI*2, 0, Math.PI*0.55),
-      band:new THREE.CylinderGeometry(0.445, 0.445, 0.08, 16, 1, true), nvg:new THREE.BoxGeometry(0.14, 0.12, 0.2), ear:new THREE.CylinderGeometry(0.13, 0.13, 0.12, 12),
-      cap:new THREE.SphereGeometry(0.38, 14, 8, 0, Math.PI*2, 0, Math.PI*0.5), limb:new THREE.CylinderGeometry(1, 1, 1, 14), hand:new THREE.SphereGeometry(0.1, 12, 10),
-      stock:new THREE.BoxGeometry(0.45, 0.2, 0.12), receiver:new THREE.BoxGeometry(0.75, 0.22, 0.13), rail:new THREE.CylinderGeometry(0.075, 0.075, 0.75, 10).rotateZ(Math.PI/2),
-      barrel:new THREE.CylinderGeometry(0.035, 0.035, 0.45, 8).rotateZ(Math.PI/2), muzzle:new THREE.CylinderGeometry(0.05, 0.05, 0.12, 8).rotateZ(Math.PI/2),
-      mag:new THREE.BoxGeometry(0.13, 0.42, 0.09), grip:new THREE.BoxGeometry(0.1, 0.26, 0.09), optic:new THREE.CylinderGeometry(0.055, 0.055, 0.3, 12).rotateZ(Math.PI/2),
+    mat:{ uni:std(0, 0.95, 0, camo), pants:std(0, 0.95, 0, camoP), vest:std('#5b5a42', 0.9), pouch:std('#525139', 0.9), strap:std('#3f3f30', 0.9), helm:std('#64604a', 0.6),
+      boot:std('#6e5a40', 0.85), sole:std('#262422', 0.9), glove:std('#2b2b28', 0.8), pad:std('#33342c', 0.7), eyepro:std('#111316', 0.15, 0.6), eye:std('#1b1410', 0.3),
+      gun:std('#1f2121', 0.45, 0.35), gunTan:std('#8a7a5c', 0.6, 0.1), wood:std('#7a4a26', 0.6), optic:std('#151616', 0.3, 0.5), lens:std('#2f4f6b', 0.1, 0.8),
+      radio:std('#2a2c26', 0.6, 0.2), lamp:new THREE.MeshBasicMaterial({color:'#f4f1dc'}),
+      hJacket:std(0, 0.9, 0, clothTex('#4d2a26', ['#512d29', '#492723'], 3, 60, 3)), hPants:std(0, 0.9, 0, clothTex('#2e3440', ['#313744', '#2b313c'], 5, 60, 3)),
+      beanie:std('#1d1d1f', 0.95), shoe:std('#2a2a2d', 0.8), shoeSole:std('#d9d6cf', 0.8), hair:std('#2a1d15', 0.9), belt:std('#2b241c', 0.6),
+      jeans:std(0, 0.9, 0, clothTex('#3d4a63', ['#414f69', '#3a465e'], 9, 120, 3)) },
+    geo:{
+      // legs, hip down / knee down: thigh swells under the hip and narrows to the knee, the calf swells behind the shin
+      thigh:lathe([[0.001,-1.5],[0.19,-1.48],[0.22,-1.3],[0.27,-0.95],[0.31,-0.55],[0.32,-0.25],[0.3,0],[0.22,0.12],[0.001,0.14]]),
+      shin:lathe([[0.001,-1.42],[0.14,-1.4],[0.135,-1.2],[0.15,-0.95],[0.2,-0.55],[0.225,-0.32],[0.21,-0.08],[0.18,0.04],[0.001,0.06]]),
+      calf:new THREE.SphereGeometry(1, 16, 12),
+      boot:new THREE.SphereGeometry(1, 18, 12), sole:new THREE.CylinderGeometry(1, 1, 1, 20), ankle:new THREE.CylinderGeometry(0.17, 0.19, 0.42, 16),
+      pelvis:new THREE.SphereGeometry(1, 18, 14), joint:new THREE.SphereGeometry(1, 16, 12),
+      torso:lathe([[0.001,-0.78],[0.38,-0.76],[0.43,-0.62],[0.41,-0.42],[0.395,-0.25],[0.43,-0.02],[0.49,0.22],[0.52,0.42],[0.5,0.56],[0.42,0.68],[0.27,0.78],[0.001,0.82]], 26),
+      trap:new THREE.SphereGeometry(1, 18, 12),
+      plate:new THREE.BoxGeometry(0.15, 0.95, 0.8), cumm:new THREE.CylinderGeometry(1, 1, 0.46, 24, 1, true), strap:new THREE.BoxGeometry(0.8, 0.05, 0.17),
+      pouch:new THREE.BoxGeometry(0.15, 0.34, 0.19), flap:new THREE.BoxGeometry(0.17, 0.06, 0.2), admin:new THREE.BoxGeometry(0.07, 0.24, 0.38), panel:new THREE.BoxGeometry(0.12, 0.72, 0.58),
+      radio:new THREE.BoxGeometry(0.14, 0.42, 0.15), antenna:new THREE.CylinderGeometry(0.012, 0.012, 0.6, 5), beltRing:new THREE.CylinderGeometry(1, 1, 0.17, 24, 1, true),
+      holster:new THREE.BoxGeometry(0.2, 0.5, 0.12), dump:new THREE.BoxGeometry(0.16, 0.3, 0.32), kneePad:new THREE.SphereGeometry(1, 14, 10, 0, Math.PI*2, 0, Math.PI*0.5),
+      neck:new THREE.CylinderGeometry(0.17, 0.215, 0.36, 14), head:new THREE.SphereGeometry(0.36, 22, 16), jaw:new THREE.SphereGeometry(1, 18, 12),
+      nose:new THREE.BoxGeometry(0.09, 0.15, 0.08), ear:new THREE.SphereGeometry(1, 10, 8), eye:new THREE.SphereGeometry(0.034, 8, 6), brow:new THREE.BoxGeometry(0.05, 0.035, 0.12),
+      helm:new THREE.SphereGeometry(0.45, 22, 12, 0, Math.PI*2, 0, Math.PI*0.55), band:new THREE.CylinderGeometry(0.475, 0.47, 0.08, 22, 1, true),
+      hrail:new THREE.BoxGeometry(0.42, 0.07, 0.04), shroud:new THREE.BoxGeometry(0.1, 0.12, 0.16), nvgTube:new THREE.CylinderGeometry(0.05, 0.055, 0.22, 10).rotateZ(Math.PI/2),
+      cup:new THREE.CylinderGeometry(0.15, 0.15, 0.13, 16), eyepro:new THREE.CylinderGeometry(0.385, 0.38, 0.1, 22, 1, true, Math.PI/2 - 0.8, 1.6),
+      cap:new THREE.SphereGeometry(0.385, 18, 10, 0, Math.PI*2, 0, Math.PI*0.5), hairBack:new THREE.SphereGeometry(1, 14, 10),
+      // arms: unit length (shoulder or elbow at -0.5, the next joint at +0.5), stretched between joints every frame
+      limb:lathe([[0.001,-0.56],[0.85,-0.5],[1.0,-0.32],[1.04,-0.1],[0.96,0.15],[0.84,0.38],[0.78,0.5],[0.001,0.56]], 14),
+      fore:lathe([[0.001,-0.56],[0.82,-0.5],[1.06,-0.3],[1.0,-0.05],[0.8,0.28],[0.66,0.5],[0.001,0.55]], 14),
+      hand:new THREE.SphereGeometry(0.11, 14, 10),
+      // rifle (x runs along the barrel)
+      stock:new THREE.BoxGeometry(0.36, 0.22, 0.12), cheek:new THREE.BoxGeometry(0.28, 0.06, 0.11), buffer:new THREE.CylinderGeometry(0.05, 0.05, 0.42, 10).rotateZ(Math.PI/2),
+      lower:new THREE.BoxGeometry(0.5, 0.15, 0.11), upper:new THREE.BoxGeometry(0.62, 0.14, 0.12), topRail:new THREE.BoxGeometry(0.62, 0.035, 0.07),
+      rail:new THREE.CylinderGeometry(0.078, 0.078, 0.78, 8).rotateZ(Math.PI/2), hgRail:new THREE.BoxGeometry(0.78, 0.03, 0.06),
+      barrel:new THREE.CylinderGeometry(0.032, 0.032, 0.45, 8).rotateZ(Math.PI/2), muzzle:new THREE.CylinderGeometry(0.046, 0.046, 0.16, 8).rotateZ(Math.PI/2),
+      fsight:new THREE.BoxGeometry(0.05, 0.1, 0.03), light:new THREE.CylinderGeometry(0.036, 0.036, 0.22, 10).rotateZ(Math.PI/2), lightLens:new THREE.CircleGeometry(0.034, 10).rotateY(Math.PI/2),
+      mag:new THREE.BoxGeometry(0.13, 0.25, 0.09), grip:new THREE.BoxGeometry(0.1, 0.26, 0.09), tguard:new THREE.BoxGeometry(0.2, 0.02, 0.03),
+      optic:new THREE.BoxGeometry(0.22, 0.14, 0.12), opticWin:new THREE.PlaneGeometry(0.1, 0.09).rotateY(Math.PI/2),
       ring:new THREE.RingGeometry(0.95, 1.12, 40) }
   };
 }
-// a cylinder limb from point a to point b
-function limb(kit, a, b, r, mat){
-  const m = new THREE.Mesh(kit.geo.limb, mat), A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), d = B.clone().sub(A), L = d.length();
+// a limb from point a to point b
+function limb(kit, a, b, r, mat, geo){
+  const m = new THREE.Mesh(geo || kit.geo.limb, mat), A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), d = B.clone().sub(A), L = d.length();
   m.scale.set(r, L, r); m.position.copy(A).add(B).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize()); return m;
 }
 function buildFigure(kit, it, idx, col){
   const M = kit.mat, G = kit.geo, f = it.k==='f', h = it.k==='h', armed = it.k!=='c';
-  const skin = kit.std(SKIN[idx % SKIN.length]);
-  const top = f ? M.uni : h ? M.hJacket : kit.std(CIV_SHIRT[idx % CIV_SHIRT.length]), legs = f ? M.pants : h ? M.hPants : M.jeans, feet = f ? M.boot : M.shoe;
+  const skin = kit.std(SKIN[idx % SKIN.length], 0.62);
+  const top = f ? M.uni : h ? M.hJacket : kit.std(CIV_SHIRT[idx % CIV_SHIRT.length], 0.9), legs = f ? M.pants : h ? M.hPants : M.jeans, feet = f ? M.boot : M.shoe;
   const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
   const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); parent.add(m); return m; };
-  // legs: hip → knee → foot
   const ball = (parent, mat, x, y, z, r) => { const m = add(parent, G.joint, mat, x, y, z); m.scale.set(r, r, r); return m; };
+  // legs: hip → knee → foot
   const leg = side => { const hip = new THREE.Group(); hip.position.set(0, 3.0, side*0.25); body.add(hip);
-    ball(hip, legs, 0, 0, 0, 0.29); add(hip, G.thigh, legs, 0, 0, 0); const knee = new THREE.Group(); knee.position.set(0, -1.45, 0); hip.add(knee);
-    ball(knee, legs, 0, 0, 0, 0.215); add(knee, G.shin, legs, 0, 0, 0); ball(knee, legs, 0, -1.36, 0, 0.155);
+    add(hip, G.thigh, legs, 0, 0, 0);
+    if(f && side > 0) add(hip, G.holster, M.pouch, -0.02, -0.5, 0.24);   // pistol on the right thigh
+    const knee = new THREE.Group(); knee.position.set(0, -1.45, 0); hip.add(knee);
+    add(knee, G.shin, legs, 0, 0, 0); add(knee, G.calf, legs, -0.06, -0.38, 0).scale.set(0.14, 0.3, 0.16);
+    if(f){ const kp = add(knee, G.kneePad, M.pad, 0.13, 0, 0); kp.scale.set(0.2, 0.12, 0.2); kp.rotation.z = -Math.PI/2; }
     const foot = new THREE.Group(); foot.position.set(0, -1.4, 0); knee.add(foot);
-    add(foot, G.boot, feet, 0.13, -0.05, 0).scale.set(0.34, 0.15, 0.165); add(foot, G.sole, feet, 0.12, -0.14, 0).scale.set(0.2, 0.06, 0.17);
+    add(foot, G.ankle, feet, 0, 0.12, 0).scale.set(f ? 1 : 0.85, f ? 1 : 0.55, f ? 1 : 0.85);
+    add(foot, G.boot, feet, 0.17, -0.04, 0).scale.set(0.45, 0.14, 0.17);
+    add(foot, G.sole, f ? M.sole : M.shoeSole, 0.16, -0.12, 0).scale.set(0.47, 0.06, 0.18);
     return {hip, knee, foot}; };
   const L = leg(-1), R = leg(1);
-  add(body, G.pelvis, legs, 0, 3.12, 0).scale.set(0.34, 0.36, 0.52);
+  add(body, G.pelvis, legs, 0, 3.1, 0).scale.set(0.35, 0.36, 0.53);
   const torso = add(body, G.torso, top, 0, 3.95, 0); torso.scale.set(0.72, 1, 1.12);
-  for(const z of [-0.47, 0.47]) ball(body, top, 0, 4.6, z, 0.175);
-  if(f){ add(body, G.plate, M.vest, 0.3, 4.05, 0); add(body, G.plate, M.vest, -0.3, 4.05, 0).scale.set(1, 1, 1);
-    for(const z of [-0.26, 0, 0.26]) add(body, G.pouch, M.pouch, 0.43, 3.72, z);
-    add(body, G.pack, M.pouch, -0.48, 4.05, 0); }
-  add(body, G.neck, skin, 0, 4.85, 0);
+  add(body, G.trap, top, -0.03, 4.7, 0).scale.set(0.26, 0.2, 0.4);
+  for(const z of [-0.45, 0.45]) add(body, G.joint, top, 0, 4.58, z).scale.set(0.17, 0.17, 0.15);   // shoulders
+  add(body, G.beltRing, f ? M.strap : M.belt, 0, 3.32, 0).scale.set(0.33, 1, 0.5);
+  if(f){
+    // plate carrier: front and back plates, cummerbund, shoulder straps, triple mag pouch, admin pouch, radio, back panel
+    add(body, G.plate, M.vest, 0.36, 4.08, 0); add(body, G.plate, M.vest, -0.36, 4.08, 0);
+    add(body, G.cumm, M.vest, 0, 3.78, 0).scale.set(0.37, 1, 0.55);
+    for(const z of [-0.3, 0.3]) add(body, G.strap, M.strap, 0, 4.64, z);
+    for(const z of [-0.23, 0, 0.23]){ add(body, G.pouch, M.pouch, 0.5, 3.82, z); add(body, G.flap, M.pouch, 0.5, 4.0, z); }
+    add(body, G.admin, M.pouch, 0.46, 4.27, 0);
+    add(body, G.panel, M.pouch, -0.48, 4.08, 0);
+    add(body, G.radio, M.radio, -0.5, 4.12, -0.33); add(body, G.antenna, M.radio, -0.5, 4.6, -0.36).rotation.x = -0.12;
+    add(body, G.dump, M.pouch, -0.36, 3.28, -0.2);
+  }
+  add(body, G.neck, skin, 0.02, 4.86, 0);
+  if(h) add(body, G.hairBack, top, -0.24, 4.84, 0).scale.set(0.16, 0.2, 0.34);   // hood bunched behind the neck
   // head group (nods together)
   const head = new THREE.Group(); head.position.set(0, 5.0, 0); body.add(head);
-  add(head, G.head, skin, 0.02, 0.4, 0).scale.set(1, 1.12, 0.92);
-  if(f){ add(head, G.helm, M.helm, 0, 0.47, 0).scale.set(1.02, 0.95, 1);
-    add(head, G.band, kit.std(col, 0.6), 0, 0.56, 0); add(head, G.nvg, M.optic, 0.4, 0.72, 0);
-    for(const z of [-0.36, 0.36]){ const e = add(head, G.ear, M.helm, 0, 0.36, z); e.rotation.x = Math.PI/2; } }
-  else if(h) add(head, G.cap, M.beanie, 0, 0.5, 0);
-  else add(head, G.cap, M.hair, -0.03, 0.48, 0);
+  add(head, G.head, skin, 0.02, 0.4, 0).scale.set(1, 1.1, 0.9);
+  add(head, G.jaw, skin, 0.09, 0.16, 0).scale.set(0.29, 0.22, 0.27);
+  add(head, G.nose, skin, 0.38, 0.36, 0).rotation.z = 0.15;
+  for(const z of [-0.33, 0.33]) add(head, G.ear, skin, 0, 0.4, z).scale.set(0.06, 0.1, 0.05);
+  if(f){
+    add(head, G.eyepro, M.eyepro, 0.02, 0.47, 0);
+    add(head, G.helm, M.helm, 0, 0.5, 0).scale.set(1.03, 0.95, 1);
+    add(head, G.band, kit.std(col, 0.6), 0, 0.58, 0);
+    for(const z of [-0.44, 0.44]) add(head, G.hrail, M.helm, -0.02, 0.62, z);
+    add(head, G.shroud, M.optic, 0.42, 0.74, 0);
+    for(const z of [-0.07, 0.07]){ const t = add(head, G.nvgTube, M.optic, 0.47, 0.86, z); t.rotation.z = 0.9; }
+    for(const z of [-0.36, 0.36]){ const e = add(head, G.cup, M.pad, 0, 0.38, z); e.rotation.x = Math.PI/2; }
+  } else {
+    for(const z of [-0.11, 0.11]){ add(head, G.eye, M.eye, 0.33, 0.47, z); add(head, G.brow, M.hair, 0.34, 0.54, z); }
+    if(h) add(head, G.cap, M.beanie, 0, 0.5, 0).scale.set(1, 1.15, 1);
+    else { add(head, G.cap, M.hair, -0.03, 0.5, 0);
+      if(idx % 2) add(head, G.hairBack, M.hair, -0.18, 0.3, 0).scale.set(0.24, 0.38, 0.34); }   // longer hair on some
+  }
   // arms and weapon
   let pivot = null, armL = null;
   const shoulderR = [0, 4.62, 0.48], shoulderL = [0, 4.62, -0.48];
+  const sleeve = top, forearm = armed ? top : skin, hands = f ? M.glove : skin;
   if(armed){
     pivot = new THREE.Group(); pivot.position.set(0.25, 4.5, 0.22); pivot.rotation.order = 'ZXY'; body.add(pivot);
-    const gunMat = M.gun, P = (x,y,z) => [x - 0.25, y - 4.5, z - 0.22];  // body coords → pivot coords
-    add(pivot, G.stock, gunMat, -0.05, -0.02, 0); add(pivot, G.receiver, gunMat, 0.55, 0, 0); add(pivot, G.rail, f ? M.gunTan : gunMat, 1.3, 0.01, 0);
-    add(pivot, G.barrel, gunMat, 1.88, 0.02, 0); add(pivot, G.muzzle, gunMat, 2.15, 0.02, 0);
-    var flash = new THREE.Mesh(G.joint, new THREE.MeshBasicMaterial({color:'#ffd36b', transparent:true, opacity:0.95})); flash.position.set(2.6, 0.02, 0); flash.scale.set(0.55, 0.32, 0.32); flash.visible = false; pivot.add(flash);
-    const mag = add(pivot, G.mag, gunMat, 0.72, -0.28, 0); mag.rotation.z = 0.18; const grip = add(pivot, G.grip, gunMat, 0.3, -0.2, 0); grip.rotation.z = 0.35;
-    add(pivot, G.optic, M.optic, 0.62, 0.2, 0); add(pivot, G.hand, M.lens, 0.79, 0.2, 0).scale.set(0.5, 0.5, 0.5);
+    const gm = M.gun, furn = h ? M.wood : gm, P = (x,y,z) => [x - 0.25, y - 4.5, z - 0.22];  // body coords → pivot coords
+    add(pivot, G.stock, furn, -0.12, -0.04, 0); add(pivot, G.cheek, furn, -0.1, 0.1, 0); add(pivot, G.buffer, gm, 0.06, 0.03, 0);
+    add(pivot, G.lower, gm, 0.5, -0.05, 0); add(pivot, G.upper, gm, 0.55, 0.08, 0); add(pivot, G.topRail, gm, 0.55, 0.165, 0);
+    add(pivot, G.rail, f ? M.gunTan : furn, 1.25, 0.04, 0); add(pivot, G.hgRail, gm, 1.25, 0.125, 0);
+    add(pivot, G.barrel, gm, 1.86, 0.04, 0); add(pivot, G.muzzle, gm, 2.14, 0.04, 0); add(pivot, G.fsight, gm, 1.58, 0.17, 0);
+    if(f){ add(pivot, G.light, gm, 1.5, 0.02, 0.1); add(pivot, G.lightLens, M.lamp, 1.612, 0.02, 0.1); }
+    var flash = new THREE.Mesh(G.joint, new THREE.MeshBasicMaterial({color:'#ffd36b', transparent:true, opacity:0.95})); flash.position.set(2.6, 0.04, 0); flash.scale.set(0.55, 0.32, 0.32); flash.visible = false; pivot.add(flash);
+    add(pivot, G.mag, gm, 0.7, -0.22, 0).rotation.z = 0.1; add(pivot, G.mag, gm, 0.75, -0.42, 0).rotation.z = h ? 0.45 : 0.25;
+    add(pivot, G.grip, furn, 0.3, -0.2, 0).rotation.z = 0.35; add(pivot, G.tguard, gm, 0.42, -0.14, 0);
+    if(!h){ add(pivot, G.optic, M.optic, 0.6, 0.25, 0); add(pivot, G.opticWin, M.lens, 0.712, 0.26, 0); }
     const gripPt = [0.3, -0.18, 0], handguard = [1.25, -0.06, 0];
-    const sR = P(...shoulderR), sL = P(...shoulderL), eR = [ -0.18, -0.55, 0.42 ], eL = [0.55, -0.48, -0.48];
-    pivot.add(limb(kit, sR, eR, 0.14, top)); pivot.add(limb(kit, eR, gripPt, 0.12, top)); add(pivot, G.hand, f ? M.glove : skin, ...gripPt);
-    ball(pivot, top, ...sR, 0.16); ball(pivot, top, ...eR, 0.135);
-    armL = {up:new THREE.Mesh(G.limb, top), fore:new THREE.Mesh(G.limb, top), hand:new THREE.Mesh(G.hand, f ? M.glove : skin), elbow:new THREE.Mesh(G.joint, top), hg:new THREE.Vector3(...handguard)};
-    armL.elbow.scale.set(0.135, 0.135, 0.135);
-    body.add(armL.up, armL.fore, armL.hand, armL.elbow); void sL; void eL;
+    const sR = P(...shoulderR), eR = [ -0.18, -0.55, 0.42 ];
+    pivot.add(limb(kit, sR, eR, 0.15, sleeve)); pivot.add(limb(kit, eR, gripPt, 0.125, forearm, G.fore)); add(pivot, G.hand, hands, ...gripPt);
+    ball(pivot, sleeve, ...eR, 0.12);
+    armL = {up:new THREE.Mesh(G.limb, sleeve), fore:new THREE.Mesh(G.fore, forearm), hand:new THREE.Mesh(G.hand, hands), elbow:new THREE.Mesh(G.joint, sleeve), hg:new THREE.Vector3(...handguard)};
+    armL.elbow.scale.set(0.12, 0.12, 0.12);
+    body.add(armL.up, armL.fore, armL.hand, armL.elbow); void shoulderL;
   } else {
-    // two-jointed arms posed every frame (hanging, hands up, hands to his face, hands behind his back)
+    // two-jointed arms posed every frame (hanging, hands up, hands to his face, hands behind his back); short sleeves
     var arms = [];
     for(const [s, z] of [[shoulderR, 0.55], [shoulderL, -0.55]]){
-      const a = {side:Math.sign(z), sh:V3(...s), rest:V3(0.12, 3.15, z*0.95), up:new THREE.Mesh(G.limb, top), fore:new THREE.Mesh(G.limb, skin), hand:new THREE.Mesh(G.hand, skin), elbow:new THREE.Mesh(G.joint, top)};
-      a.elbow.scale.set(0.125, 0.125, 0.125); body.add(a.up, a.fore, a.hand, a.elbow); arms.push(a); }
+      const a = {side:Math.sign(z), sh:V3(...s), rest:V3(0.12, 3.15, z*0.95), up:new THREE.Mesh(G.limb, sleeve), fore:new THREE.Mesh(G.fore, skin), hand:new THREE.Mesh(G.hand, skin), elbow:new THREE.Mesh(G.joint, skin)};
+      a.elbow.scale.set(0.11, 0.11, 0.11); body.add(a.up, a.fore, a.hand, a.elbow); arms.push(a); }
   }
   // affiliation ring at his feet
   const ring = new THREE.Mesh(G.ring, new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.9, side:THREE.DoubleSide, depthWrite:false}));
   ring.rotation.x = -Math.PI/2; ring.position.y = 0.05; g.add(ring);
   g.traverse(o => { if(o.isMesh && o!==ring){ o.castShadow = true; } });
-  return {g, body, head, pivot, L, R, armL, flash: armed ? flash : null, arms: armed ? null : arms, gait:{ph:0, amp:0}, lean:0};
+  // Halligan bar: 3 ft steel bar with a fork at one end and an adze and pike at the other, carried on his back
+  let hal = null;
+  if(f){ hal = new THREE.Group(); const steel = kit.std('#5b5f63', 0.4, 0.6);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 3, 8), steel); hal.add(bar);
+    const fork = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.05), steel); fork.position.set(0, -1.55, 0); hal.add(fork);
+    const adze = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.1), steel); adze.position.set(0.12, 1.48, 0); hal.add(adze);
+    const pike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.3, 6), steel); pike.position.set(-0.22, 1.48, 0); pike.rotation.z = Math.PI/2; hal.add(pike);
+    hal.visible = false; body.add(hal); hal.traverse(o => { if(o.isMesh) o.castShadow = true; }); }
+  return {g, body, head, pivot, L, R, armL, hal, flash: armed ? flash : null, arms: armed ? null : arms, gait:{ph:0, amp:0}, lean:0};
 }
 // standing, walking stride, or kneeling on the right knee
 // Walking with planted feet: each foot stays put on the floor while the body passes over it (so nothing slides),
@@ -3179,6 +3356,18 @@ function animateActions(p, ps, byId, now){
     else if(sig.s==='ctrl' && sig.to && byId[sig.to]){ const q = byId[sig.to]; q.g.updateMatrixWorld(true);   // cuffing: his hand on the man's wrists behind his back, a couple of taps
       const tap = 0.08*Math.abs(Math.sin((TIME - sig.t0)*Math.PI*2.2));
       target = B.worldToLocal(q.body.localToWorld(V3(-0.5, 3.55 + tap, 0))); w = Math.min(clamp((TIME - sig.t0)/0.3, 0, 1), clamp((sig.t1 - TIME)/0.25, 0, 1)); busy = true; }
+    else if(sig.s==='charge' && sig.key){ busy = true;   // pressing the charge onto the door
+      const dc = doorCenter(sig.key); target = B.worldToLocal(V3(dc.x*FT, 3.3, dc.y*FT)); w = sigBlend(sig, TIME, 0.35, 0.3); }
+    else if(sig.s==='bwin' && sig.wx!=null){ busy = true;   // Halligan: off his back, wind up, strike the glass, rake the frame, back on his back
+      const wl = B.worldToLocal(V3(sig.wx*FT, 4.6, sig.wy*FT)), toW = wl.clone().sub(shoulder), strike = shoulder.clone().add(toW.clone().setLength(Math.min(1.9, toW.length())));
+      const back = V3(-0.35, 5.2, -0.45), up = V3(0.05, 6.1, -0.35), rake = strike.clone().add(V3(0, -0.7, 0));
+      if(f < 0.25) target = rest.clone().lerp(back, easeIO(f/0.25));
+      else if(f < 0.5) target = back.clone().lerp(up, easeIO((f-0.25)/0.25));
+      else if(f < 0.6) target = up.clone().lerp(strike, easeIO((f-0.5)/0.1));
+      else if(f < 0.8) target = strike.clone().lerp(rake, easeIO((f-0.6)/0.2));
+      else target = rake.clone().lerp(back, easeIO((f-0.8)/0.2));
+      w = f < 0.92 ? 1 : clamp((1 - f)/0.08, 0, 1);
+      p.halPose = {f, wl}; }
     else if(sig.s==='bcall'){ busy = true;   // flashbang call: arm straight up, fist opens and closes three times
       const pump = Math.abs(Math.sin(Math.PI*3*f)); target = V3(-0.05, 6.1 + 0.12*pump, -0.45); A.hand.scale.setScalar(1 + 0.5*pump);
       w = sig.to ? clamp((TIME - sig.t0)/0.25, 0, 1) : sigBlend(sig, TIME, 0.25, 0.25); }   // in a stack the fist stays up
@@ -3206,6 +3395,12 @@ function animateActions(p, ps, byId, now){
   let bend = V3(-0.2, -1, -0.6); bend.sub(dir.clone().multiplyScalar(bend.dot(dir))); if(bend.lengthSq() < 1e-6) bend = V3(0,0,-1); bend.normalize();
   const hgt = Math.sqrt(Math.max(0, L1*L1 - (dd/2)*(dd/2))), elbow = mid.add(bend.multiplyScalar(hgt));
   setLimb(A.up, shoulder, elbow, 0.14); setLimb(A.fore, elbow, handP, 0.12); A.hand.position.copy(handP); if(A.elbow) A.elbow.position.copy(elbow);
+  // the Halligan sits in his hand, held near the fork end, pointing the way he's swinging it
+  if(p.hal){ const hp = sig && sig.s==='bwin' ? p.halPose : null; p.hal.visible = !!hp && hp.f < 0.95;
+    if(p.hal.visible){ const f = hp.f, toW = hp.wl.clone().sub(handP).normalize();
+      const dir = f < 0.25 ? V3(-0.2, 1, 0).normalize() : f < 0.5 ? V3(-0.5, 0.85, 0).normalize() : f < 0.8 ? toW : V3(-0.2, 1, 0).normalize().lerp(toW, clamp((0.95 - f)/0.15, 0, 1)).normalize();
+      p.hal.position.copy(handP).add(dir.clone().multiplyScalar(0.95)); p.hal.quaternion.setFromUnitVectors(V3(0,1,0), dir); } }
+  p.halPose = null;
   return busy;
 }
 function disposeTree(g){
@@ -3254,11 +3449,11 @@ function build3D(){
   const E = {wall:new THREE.EdgesGeometry(G.wall), head:new THREE.EdgesGeometry(G.head), sill:new THREE.EdgesGeometry(G.sill), slab:new THREE.EdgesGeometry(G.slab)};
   const put = (geo, mat, eg, x, y, z, ry) => { const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); m.rotation.y = ry; m.castShadow = true; m.receiveShadow = true; root.add(m);
     if(eg){ const l = new THREE.LineSegments(eg, edgeMat); l.position.copy(m.position); l.rotation.y = ry; root.add(l); } return m; };
-  T.segs = []; T.gunSegs = [];
+  T.segs = []; T.gunSegs = []; T.glass = [];
   for(const [k,e] of S.edges){
     const [d,x,y] = parseKey(k), cx = d==='h'?(x+.5)*FT:x*FT, cz = d==='h'?y*FT:(y+.5)*FT, ry = d==='h'?0:Math.PI/2, p = edgePts(d,x,y).map(v=>v*FT);
     if(e.t==='w'){ put(G.wall, wallMat, E.wall, cx, WALL_H/2, cz, ry); T.segs.push(p); T.gunSegs.push([...p, TH/2]); }
-    else if(e.t==='n'){ put(G.sill, wallMat, E.sill, cx, 1.5, cz, ry); put(G.head, wallMat, E.head, cx, 7.5, cz, ry); put(G.glass, glassMat, null, cx, 5, cz, ry); T.segs.push(p); T.gunSegs.push([...p, TH/2]); }
+    else if(e.t==='n'){ put(G.sill, wallMat, E.sill, cx, 1.5, cz, ry); put(G.head, wallMat, E.head, cx, 7.5, cz, ry); T.glass.push({k, m:put(G.glass, glassMat, null, cx, 5, cz, ry)}); T.segs.push(p); }
     else { put(G.head, wallMat, E.head, cx, 7.5, cz, ry);
       if(e.t==='d'){ const s0 = doorSlab(d,x,y,e,0), grp = new THREE.Group(); grp.position.set(s0.hx*FT, 0, s0.hy*FT);
         grp.add(new THREE.Mesh(G.slab, doorMat)); grp.add(new THREE.LineSegments(E.slab, edgeMat));
@@ -3298,7 +3493,7 @@ function build3D(){
     root.add(fig.g);
     const tag = it.l || (it.k==='h'?'H':it.k==='c'?'C':'');
     let sp = null; if(tag){ sp = textSprite(tag.slice(0,4), '#ffffff', col); sp.scale.multiplyScalar(0.8); root.add(sp); }
-    T.people.push({it, g:fig.g, body:fig.body, L:fig.L, R:fig.R, pivot:fig.pivot, armL:fig.armL, flash:fig.flash, arms:fig.arms, sp, fan, head:fig.head, col, pitch:null, sigText:'', sigSp:null});
+    T.people.push({it, g:fig.g, body:fig.body, L:fig.L, R:fig.R, pivot:fig.pivot, armL:fig.armL, hal:fig.hal, flash:fig.flash, arms:fig.arms, sp, fan, head:fig.head, col, pitch:null, sigText:'', sigSp:null});
   });
   for(const it of S.items){ if(it.k!=='label' || !it.l) continue; const sp = textSprite(it.l.toUpperCase(), C.ink, C.bg); sp.position.set(it.x*FT, 9.6, it.y*FT); sp.scale.multiplyScalar(1.15); root.add(sp); }
   for(const a of S.arrows){
@@ -3329,7 +3524,7 @@ function build3D(){
     const ball = new THREE.Mesh(gPuff, new THREE.MeshBasicMaterial({color:'#ffffff', transparent:true, opacity:0, depthWrite:false})); ball.visible = false; root.add(ball);
     const light = new THREE.PointLight(0xffffff, 0, 40); root.add(light);
     const puffs = []; for(let i=0;i<7;i++){ const m = new THREE.Mesh(gPuff, new THREE.MeshLambertMaterial({color:'#a3a39d', transparent:true, opacity:0, depthWrite:false})); m.visible = false; root.add(m); puffs.push(m); }
-    const ring = new THREE.Mesh(new THREE.RingGeometry(BANG.stunR*FT - 0.25, BANG.stunR*FT, 64), new THREE.MeshBasicMaterial({color:'#ff6a3d', transparent:true, opacity:0, side:THREE.DoubleSide, depthWrite:false}));
+    const ring = new THREE.Mesh(new THREE.RingGeometry((p.stunR||BANG.stunR)*FT - 0.25, (p.stunR||BANG.stunR)*FT, 64), new THREE.MeshBasicMaterial({color:'#ff6a3d', transparent:true, opacity:0, side:THREE.DoubleSide, depthWrite:false}));
     ring.rotation.x = -Math.PI/2; ring.position.set(p.rx*FT, 0.08, p.ry*FT); ring.visible = false; root.add(ring);
     T.bangs.push({p, can, ball, light, puffs, ring});
   }
@@ -3346,17 +3541,19 @@ function updateDyn(dt){
   if(T.camPath) T.camPath.visible = camMode==='path' && false;
   for(const bb of (T.bangs||[])){ const p = bb.p, b = bangAt(p, TIME), dt = TIME - p.det;
     bb.can.visible = !!b && b.state!=='spent'; if(b){ bb.can.position.set(b.x*FT, Math.max(0.15, b.z), b.y*FT); bb.can.rotation.z = b.state==='air' ? TIME*12 : Math.PI/2; }
-    if(bb.ring){ const on = TIME >= p.det && TIME < p.det + BANG.stunT; bb.ring.visible = on; if(on){ bb.ring.material.opacity = 0.85*(1 - (TIME - p.det)/BANG.stunT); busy = true; } }
-    const boom = b && b.state==='spent' && dt < 0.5; bb.ball.visible = boom; bb.light.intensity = boom ? 6*(1-dt/0.5) : 0;
+    if(bb.ring){ const end = lastReport(p) + BANG.stunT, on = TIME >= p.det && TIME < end; bb.ring.visible = on; if(on){ bb.ring.material.opacity = 0.85*(1 - (TIME - p.det)/(end - p.det)); busy = true; } }
+    const dr = sinceReport(p, TIME), pop = reports(p) > 1 ? 0.18 : 0.5, boom = dr!=null && dr < pop; bb.ball.visible = boom; bb.light.intensity = boom ? 6*(1-dr/pop) : 0;
     if(b){ bb.light.position.set(b.x*FT, 3, b.y*FT); bb.ball.position.set(b.x*FT, 1.5, b.y*FT); }
-    if(boom){ const s = 1 + dt*14; bb.ball.scale.set(s,s,s); bb.ball.material.opacity = 0.9*(1-dt/0.5); busy = true; }
+    if(boom){ const s = 1 + dr*(reports(p) > 1 ? 18 : 14); bb.ball.scale.set(s,s,s); bb.ball.material.opacity = 0.9*(1-dr/pop); busy = true; }
+    if(dr!=null && TIME < lastReport(p) + 0.3) busy = true;
     bb.puffs.forEach((m,i) => { const on = b && b.state==='spent' && dt < 5; m.visible = !!on; if(!on) return;
       const a = i*0.9 + p.det, rad2 = Math.min(dt,2)*1.4, s = (1.2 + Math.min(dt,3)*0.9)*(0.6 + (i%3)*0.25);
       m.position.set(b.x*FT + Math.cos(a)*rad2, 1 + (i%3)*0.9 + Math.min(dt,3)*0.4, b.y*FT + Math.sin(a)*rad2); m.scale.set(s,s,s);
       m.material.opacity = Math.max(0, 0.45*(dt < 0.3 ? dt/0.3 : 1 - Math.max(0, dt-2)/3)); });
     if(b && b.state==='live') busy = busy || false; }
   { const fx = document.getElementById('flashfx'); if(fx) fx.style.opacity = mode==='plan' ? 0 : flashAlpha(TIME)*0.9; }
-  for(const dr of (T.doors||[])){ const s = doorSlab(dr.d, dr.x, dr.y, dr.e, doorAngle(dr.k, TIME)); dr.grp.rotation.y = -Math.atan2(s.ey-s.hy, s.ex-s.hx); }
+  for(const dr of (T.doors||[])){ const s = doorSlab(dr.d, dr.x, dr.y, dr.e, doorAngle(dr.k, TIME)); dr.grp.rotation.y = -Math.atan2(s.ey-s.hy, s.ex-s.hx); dr.grp.visible = !doorBlown(dr.k, TIME); }
+  for(const g of (T.glass||[])) g.m.visible = !windowBroken(g.k, TIME);
   for(const p of T.people){
     const ps = poseAt(p.it, TIME);
     { const on = standOn(ps.x, ps.y), hy = on ? FURN[on.k].h : 0; p.hY = p.hY==null ? hy : p.hY + (hy - p.hY)*Math.min(1, dt*10); if(Math.abs(hy - p.hY) > 0.01) busy = true; }
@@ -3383,6 +3580,7 @@ function updateDyn(dt){
       p.cant = p.cant==null ? cant : (cant > p.cant ? cant : p.cant + (cant - p.cant)*Math.min(1, dt*8));
       // drawn right in, the rifle also comes across to the middle of his chest
       p.pivot.position.x = 0.25 - p.back; p.pivot.position.z = 0.22 - 0.2*clamp(p.back/0.3, 0, 1); p.pivot.rotation.x = p.cant;
+      if(ps.sig && ps.sig.s==='bwin'){ const f = clamp((TIME - ps.sig.t0)/(ps.sig.t1 - ps.sig.t0), 0, 1); p.pivot.position.x += 0.8*Math.sin(Math.PI*f); busy = true; }   // muzzle jab through the glass
       if(p.back > 0.01 || p.cant > 0.01) busy = busy || playing;
       // a little rifle movement in time with his steps
       const gw = p.gait || {ph:0, amp:0}; p.wig = Math.sin(gw.ph*2)*0.018*gw.amp; p.pivot.rotation.z = p.pitch + p.wig;
@@ -3676,6 +3874,8 @@ $('#btn-add-step').addEventListener('click', () => { checkpoint(); const s = {id
 $('#btn-undo').addEventListener('click', undo);
 $('#btn-redo').addEventListener('click', redo);
 $('#btn-fit').addEventListener('click', () => { if(mode==='plan') fitPlan(); else if(mode==='walk') startWalk(); else resetOrbit(); });
+$('#btn-past').addEventListener('click', () => { pastOff = !pastOff; $('#btn-past').setAttribute('aria-pressed', String(!pastOff)); drawPlan();
+  toast(pastOff ? 'Routes already walked by this point in the timeline are hidden. Scrub to where you want to start the next phase and keep drawing' : 'All routes shown'); });
 $('#btn-dead').addEventListener('click', () => { deadOn = !deadOn; $('#btn-dead').setAttribute('aria-pressed', String(deadOn)); drawPlan();
   if(!deadOn){ toast('Dead space shading off'); return; }
   const D = deadSpace(); drawPlan();
@@ -4885,7 +5085,7 @@ function buildZipper(){
     // no room for a step that keeps clear of everyone: he throws from where he stands
     const lineOwner = b.m.i >= 0 ? bq.path[b.m.i] : bq;
     lineOwner.acts = (lineOwner.acts || []).filter(a => a.k!=='btake'); lineOwner.acts.push({k:'btake', from:cq.id, how:same ? 'hand' : 'nod'});
-    const tgt = F.P(F.mid - bl*0.35, o.line - side*clamp(F.depth*0.5, 1.2, 2.6)), bang = {k:'bang', x:r2(tgt.x), y:r2(tgt.y), fuse:1.5, hook:1};
+    const tgt = F.P(F.mid - bl*0.35, o.line - side*clamp(F.depth*0.5, 1.2, 2.6)), bang = {k:'bang', x:r2(tgt.x), y:r2(tgt.y), fuse:1.5, hook:1, n:9};
     if(step){ if(!bq.path) bq.path = [];
       bq.path.splice(b.m.i + 1, 0, {x:r2(step.x), y:r2(step.y), sp:3, w:0, go:'', g:null, lx:r2(doorLook.x), ly:r2(doorLook.y), acts:[bang]}); b.m.i += 1; }
     else lineOwner.acts.push(bang);
